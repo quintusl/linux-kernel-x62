@@ -226,7 +226,7 @@ static void add_mixer(struct alc_spec *spec, const struct snd_kcontrol_new *mix)
 static const struct hda_verb alc_gpio1_init_verbs[] = {
 	{0x01, AC_VERB_SET_GPIO_MASK, 0x01},
 	{0x01, AC_VERB_SET_GPIO_DIRECTION, 0x01},
-	{0x01, AC_VERB_SET_GPIO_DATA, 0x00},
+	{0x01, AC_VERB_SET_GPIO_DATA, 0x01},
 	{ }
 };
 
@@ -5264,6 +5264,8 @@ static const struct hda_fixup alc269_fixups[] = {
 	[ALC269_FIXUP_THINKPAD_ACPI] = {
 		.type = HDA_FIXUP_FUNC,
 		.v.func = hda_fixup_thinkpad_acpi,
+		.chained = true,
+		.chain_id = ALC269_FIXUP_SKU_IGNORE,
 	},
 	[ALC269_FIXUP_DMIC_THINKPAD_ACPI] = {
 		.type = HDA_FIXUP_FUNC,
