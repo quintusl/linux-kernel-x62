@@ -78,7 +78,6 @@ static int dwc3_ep0_start_trans(struct dwc3 *dwc, u8 epnum)
 	dep = dwc->eps[epnum];
 	if (dep->flags & DWC3_EP_BUSY)
 		return 0;
-	}
 
 	memset(&params, 0, sizeof(params));
 	params.param0 = upper_32_bits(dwc->ep0_trb_addr);

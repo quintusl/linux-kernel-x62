@@ -70,15 +70,6 @@ EXPORT_SYMBOL(lwtunnel_state_alloc);
 static const struct lwtunnel_encap_ops __rcu *
 		lwtun_encaps[LWTUNNEL_ENCAP_MAX + 1] __read_mostly;
 
-void lwtstate_free(struct lwtunnel_state *lws)
-{
-	const struct lwtunnel_encap_ops *ops = lwtun_encaps[lws->type];
-
-	kfree(lws);
-	module_put(ops->owner);
-}
-EXPORT_SYMBOL(lwtstate_free);
-
 int lwtunnel_encap_add_ops(const struct lwtunnel_encap_ops *ops,
 			   unsigned int num)
 {

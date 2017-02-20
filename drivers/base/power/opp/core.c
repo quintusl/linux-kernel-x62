@@ -1626,14 +1626,14 @@ int dev_pm_opp_register_set_opp_helper(struct device *dev,
 	opp_table->set_opp = set_opp;
 
 	mutex_unlock(&opp_table_lock);
-	return opp_table;
+	return 0;
 
 err:
 	_remove_opp_table(opp_table);
 unlock:
 	mutex_unlock(&opp_table_lock);
 
-	return ERR_PTR(ret);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_register_set_opp_helper);
 
@@ -1650,6 +1650,8 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_register_set_opp_helper);
  */
 void dev_pm_opp_register_put_opp_helper(struct device *dev)
 {
+	struct opp_table *opp_table;
+
 	mutex_lock(&opp_table_lock);
 
 	/* Check for existing table for 'dev' first */
