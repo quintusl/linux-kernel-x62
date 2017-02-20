@@ -58,7 +58,7 @@
 #define SMBSLVDAT	(0xC + piix4_smba)
 
 /* count for request_region */
-#define SMBIOSIZE	8
+#define SMBIOSIZE	9
 
 /* PCI Address Constants */
 #define SMBBA		0x090
@@ -610,6 +610,24 @@ static s32 piix4_access_sb800(struct i2c_adapter *adap, u16 addr,
 
 	mutex_lock(&piix4_mutex_sb800);
 
+	/* Request the SMBUS semaphore, avoid conflicts with the IMC */
+	smbslvcnt  = inb_p(SMBSLVCNT);
+	do {
+		outb_p(smbslvcnt | 0x10, SMBSLVCNT);
+
+		/* Check the semaphore status */
+		smbslvcnt  = inb_p(SMBSLVCNT);
+		if (smbslvcnt & 0x10)
+			break;
+
+		usleep_range(1000, 2000);
+	} while (--retries);
+	/* SMBus is still owned by the IMC, we give up */
+	if (!retries) {
+		mutex_unlock(&piix4_mutex_sb800);
+		return -EBUSY;
+	}
+
 	outb_p(piix4_port_sel_sb800, SB800_PIIX4_SMB_IDX);
 	smba_en_lo = inb_p(SB800_PIIX4_SMB_IDX + 1);
 
@@ -622,6 +640,9 @@ static s32 piix4_access_sb800(struct i2c_adapter *adap, u16 addr,
 			      command, size, data);
 
 	outb_p(smba_en_lo, SB800_PIIX4_SMB_IDX + 1);
+
+	/* Release the semaphore */
+	outb_p(smbslvcnt | 0x20, SMBSLVCNT);
 
 	mutex_unlock(&piix4_mutex_sb800);
 
