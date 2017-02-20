@@ -226,7 +226,7 @@ static void add_mixer(struct alc_spec *spec, const struct snd_kcontrol_new *mix)
 static const struct hda_verb alc_gpio1_init_verbs[] = {
 	{0x01, AC_VERB_SET_GPIO_MASK, 0x01},
 	{0x01, AC_VERB_SET_GPIO_DIRECTION, 0x01},
-	{0x01, AC_VERB_SET_GPIO_DATA, 0x01},
+	{0x01, AC_VERB_SET_GPIO_DATA, 0x00},
 	{ }
 };
 
