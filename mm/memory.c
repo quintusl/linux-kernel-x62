@@ -1197,6 +1197,7 @@ again:
 	init_rss_vec(rss);
 	start_pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	pte = start_pte;
+	flush_tlb_batched_pending(mm);
 	arch_enter_lazy_mmu_mode();
 	do {
 		pte_t ptent = *pte;
@@ -4280,7 +4281,7 @@ void __might_fault(const char *file, int line)
 	 * get paged out, therefore we'll never actually fault, and the
 	 * below annotations will generate false positives.
 	 */
-	if (segment_eq(get_fs(), KERNEL_DS))
+	if (uaccess_kernel())
 		return;
 	if (pagefault_disabled())
 		return;

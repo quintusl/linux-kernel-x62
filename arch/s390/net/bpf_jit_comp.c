@@ -24,6 +24,7 @@
 #include <linux/bpf.h>
 #include <asm/cacheflush.h>
 #include <asm/dis.h>
+#include <asm/set_memory.h>
 #include "bpf_jit.h"
 
 int bpf_jit_enable __read_mostly;
@@ -1252,7 +1253,8 @@ static int bpf_jit_prog(struct bpf_jit *jit, struct bpf_prog *fp)
 		insn_count = bpf_jit_insn(jit, fp, i);
 		if (insn_count < 0)
 			return -1;
-		jit->addrs[i + 1] = jit->prg; /* Next instruction address */
+		/* Next instruction address */
+		jit->addrs[i + insn_count] = jit->prg;
 	}
 	bpf_jit_epilogue(jit);
 

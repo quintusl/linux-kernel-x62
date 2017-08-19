@@ -364,7 +364,7 @@ void core_tpg_del_initiator_node_acl(struct se_node_acl *acl)
 	mutex_lock(&tpg->acl_node_mutex);
 	if (acl->dynamic_node_acl)
 		acl->dynamic_node_acl = 0;
-	list_del(&acl->acl_list);
+	list_del_init(&acl->acl_list);
 	mutex_unlock(&tpg->acl_node_mutex);
 
 	target_shutdown_sessions(acl);
@@ -397,6 +397,13 @@ int core_tpg_set_initiator_node_queue_depth(
 {
 	struct se_portal_group *tpg = acl->se_tpg;
 
+	/*
+	 * Allow the setting of se_node_acl queue_depth to be idempotent,
+	 * and not force a session shutdown event if the value is not
+	 * changing.
+	 */
+	if (acl->queue_depth == queue_depth)
+		return 0;
 	/*
 	 * User has requested to change the queue depth for a Initiator Node.
 	 * Change the value in the Node's struct se_node_acl, and call
@@ -541,7 +548,7 @@ int core_tpg_deregister(struct se_portal_group *se_tpg)
 	 * in transport_deregister_session().
 	 */
 	list_for_each_entry_safe(nacl, nacl_tmp, &node_list, acl_list) {
-		list_del(&nacl->acl_list);
+		list_del_init(&nacl->acl_list);
 
 		core_tpg_wait_for_nacl_pr_ref(nacl);
 		core_free_device_list_for_node(nacl, se_tpg);
