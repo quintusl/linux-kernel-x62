@@ -5238,13 +5238,6 @@ static int memory_stat_show(struct seq_file *m, void *v)
 	seq_printf(m, "workingset_nodereclaim %lu\n",
 		   stat[WORKINGSET_NODERECLAIM]);
 
-	seq_printf(m, "workingset_refault %lu\n",
-		   stat[MEMCG_WORKINGSET_REFAULT]);
-	seq_printf(m, "workingset_activate %lu\n",
-		   stat[MEMCG_WORKINGSET_ACTIVATE]);
-	seq_printf(m, "workingset_nodereclaim %lu\n",
-		   stat[MEMCG_WORKINGSET_NODERECLAIM]);
-
 	return 0;
 }
 
