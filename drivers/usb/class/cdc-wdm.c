@@ -194,8 +194,10 @@ static void wdm_in_callback(struct urb *urb)
 	/*
 	 * only set a new error if there is no previous error.
 	 * Errors are only cleared during read/open
+	 * Avoid propagating -EPIPE (stall) to userspace since it is
+	 * better handled as an empty read
 	 */
-	if (desc->rerr  == 0)
+	if (desc->rerr == 0 && status != -EPIPE)
 		desc->rerr = status;
 
 	if (length + desc->length > desc->wMaxCommand) {
@@ -361,17 +363,9 @@ static ssize_t wdm_write
 	if (we < 0)
 		return usb_translate_errors(we);
 
-	buf = kmalloc(count, GFP_KERNEL);
-	if (!buf) {
-		rv = -ENOMEM;
-		goto outnl;
-	}
-
-	r = copy_from_user(buf, buffer, count);
-	if (r > 0) {
-		rv = -EFAULT;
-		goto out_free_mem;
-	}
+	buf = memdup_user(buffer, count);
+	if (IS_ERR(buf))
+		return PTR_ERR(buf);
 
 	/* concurrent writes and disconnect */
 	r = mutex_lock_interruptible(&desc->wlock);
@@ -441,8 +435,7 @@ static ssize_t wdm_write
 
 	usb_autopm_put_interface(desc->intf);
 	mutex_unlock(&desc->wlock);
-outnl:
-	return rv < 0 ? rv : count;
+	return count;
 
 out_free_mem_pm:
 	usb_autopm_put_interface(desc->intf);

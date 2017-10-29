@@ -159,7 +159,7 @@ static void vmbus_rescind_cleanup(struct vmbus_channel *channel)
 
 
 	spin_lock_irqsave(&vmbus_connection.channelmsg_lock, flags);
-
+	channel->rescind = true;
 	list_for_each_entry(msginfo, &vmbus_connection.chn_msg_list,
 				msglistentry) {
 
@@ -332,7 +332,6 @@ static struct vmbus_channel *alloc_channel(void)
 	if (!channel)
 		return NULL;
 
-	spin_lock_init(&channel->inbound_lock);
 	spin_lock_init(&channel->lock);
 
 	INIT_LIST_HEAD(&channel->sc_list);
@@ -382,14 +381,21 @@ static void vmbus_release_relid(u32 relid)
 		       true);
 }
 
-void hv_process_channel_removal(struct vmbus_channel *channel, u32 relid)
+void hv_process_channel_removal(u32 relid)
 {
 	unsigned long flags;
-	struct vmbus_channel *primary_channel;
+	struct vmbus_channel *primary_channel, *channel;
 
-	BUG_ON(!channel->rescind);
 	BUG_ON(!mutex_is_locked(&vmbus_connection.channel_mutex));
 
+	/*
+	 * Make sure channel is valid as we may have raced.
+	 */
+	channel = relid2channel(relid);
+	if (!channel)
+		return;
+
+	BUG_ON(!channel->rescind);
 	if (channel->target_cpu != get_cpu()) {
 		put_cpu();
 		smp_call_function_single(channel->target_cpu,
@@ -428,7 +434,6 @@ void vmbus_free_channels(void)
 {
 	struct vmbus_channel *channel, *tmp;
 
-	mutex_lock(&vmbus_connection.channel_mutex);
 	list_for_each_entry_safe(channel, tmp, &vmbus_connection.chn_list,
 		listentry) {
 		/* hv_process_channel_removal() needs this */
@@ -436,7 +441,6 @@ void vmbus_free_channels(void)
 
 		vmbus_device_unregister(channel->device_obj);
 	}
-	mutex_unlock(&vmbus_connection.channel_mutex);
 }
 
 /*
@@ -453,6 +457,12 @@ static void vmbus_process_offer(struct vmbus_channel *newchannel)
 
 	/* Make sure this is a new offer */
 	mutex_lock(&vmbus_connection.channel_mutex);
+
+	/*
+	 * Now that we have acquired the channel_mutex,
+	 * we can release the potentially racing rescind thread.
+	 */
+	atomic_dec(&vmbus_connection.offer_in_progress);
 
 	list_for_each_entry(channel, &vmbus_connection.chn_list, listentry) {
 		if (!uuid_le_cmp(channel->offermsg.offer.if_type,
@@ -483,8 +493,9 @@ static void vmbus_process_offer(struct vmbus_channel *newchannel)
 			list_add_tail(&newchannel->sc_list, &channel->sc_list);
 			channel->num_sc++;
 			spin_unlock_irqrestore(&channel->lock, flags);
-		} else
+		} else {
 			goto err_free_chan;
+		}
 	}
 
 	dev_type = hv_get_dev_type(newchannel);
@@ -511,6 +522,7 @@ static void vmbus_process_offer(struct vmbus_channel *newchannel)
 	if (!fnew) {
 		if (channel->sc_creation_callback != NULL)
 			channel->sc_creation_callback(newchannel);
+		newchannel->probe_done = true;
 		return;
 	}
 
@@ -532,9 +544,7 @@ static void vmbus_process_offer(struct vmbus_channel *newchannel)
 	 * binding which eventually invokes the device driver's AddDevice()
 	 * method.
 	 */
-	mutex_lock(&vmbus_connection.channel_mutex);
 	ret = vmbus_device_register(newchannel->device_obj);
-	mutex_unlock(&vmbus_connection.channel_mutex);
 
 	if (ret != 0) {
 		pr_err("unable to add child device object (relid %d)\n",
@@ -542,6 +552,8 @@ static void vmbus_process_offer(struct vmbus_channel *newchannel)
 		kfree(newchannel->device_obj);
 		goto err_deq_chan;
 	}
+
+	newchannel->probe_done = true;
 	return;
 
 err_deq_chan:
@@ -797,6 +809,7 @@ static void vmbus_onoffer(struct vmbus_channel_message_header *hdr)
 	newchannel = alloc_channel();
 	if (!newchannel) {
 		vmbus_release_relid(offer->child_relid);
+		atomic_dec(&vmbus_connection.offer_in_progress);
 		pr_err("Unable to allocate channel object\n");
 		return;
 	}
@@ -838,33 +851,64 @@ static void vmbus_onoffer_rescind(struct vmbus_channel_message_header *hdr)
 {
 	struct vmbus_channel_rescind_offer *rescind;
 	struct vmbus_channel *channel;
-	unsigned long flags;
 	struct device *dev;
 
 	rescind = (struct vmbus_channel_rescind_offer *)hdr;
 
+	/*
+	 * The offer msg and the corresponding rescind msg
+	 * from the host are guranteed to be ordered -
+	 * offer comes in first and then the rescind.
+	 * Since we process these events in work elements,
+	 * and with preemption, we may end up processing
+	 * the events out of order. Given that we handle these
+	 * work elements on the same CPU, this is possible only
+	 * in the case of preemption. In any case wait here
+	 * until the offer processing has moved beyond the
+	 * point where the channel is discoverable.
+	 */
+
+	while (atomic_read(&vmbus_connection.offer_in_progress) != 0) {
+		/*
+		 * We wait here until any channel offer is currently
+		 * being processed.
+		 */
+		msleep(1);
+	}
+
 	mutex_lock(&vmbus_connection.channel_mutex);
 	channel = relid2channel(rescind->child_relid);
+	mutex_unlock(&vmbus_connection.channel_mutex);
 
 	if (channel == NULL) {
 		/*
-		 * This is very impossible, because in
-		 * vmbus_process_offer(), we have already invoked
-		 * vmbus_release_relid() on error.
+		 * We failed in processing the offer message;
+		 * we would have cleaned up the relid in that
+		 * failure path.
 		 */
-		goto out;
+		return;
 	}
 
-	spin_lock_irqsave(&channel->lock, flags);
-	channel->rescind = true;
-	spin_unlock_irqrestore(&channel->lock, flags);
+	/*
+	 * Now wait for offer handling to complete.
+	 */
+	while (READ_ONCE(channel->probe_done) == false) {
+		/*
+		 * We wait here until any channel offer is currently
+		 * being processed.
+		 */
+		msleep(1);
+	}
 
-	vmbus_rescind_cleanup(channel);
+	/*
+	 * At this point, the rescind handling can proceed safely.
+	 */
 
 	if (channel->device_obj) {
 		if (channel->chn_rescind_callback) {
 			channel->chn_rescind_callback(channel);
-			goto out;
+			vmbus_rescind_cleanup(channel);
+			return;
 		}
 		/*
 		 * We will have to unregister this device from the
@@ -872,28 +916,38 @@ static void vmbus_onoffer_rescind(struct vmbus_channel_message_header *hdr)
 		 */
 		dev = get_device(&channel->device_obj->device);
 		if (dev) {
+			vmbus_rescind_cleanup(channel);
 			vmbus_device_unregister(channel->device_obj);
 			put_device(dev);
 		}
-	} else {
-		hv_process_channel_removal(channel,
-			channel->offermsg.child_relid);
 	}
-
-out:
-	mutex_unlock(&vmbus_connection.channel_mutex);
+	if (channel->primary_channel != NULL) {
+		/*
+		 * Sub-channel is being rescinded. Following is the channel
+		 * close sequence when initiated from the driveri (refer to
+		 * vmbus_close() for details):
+		 * 1. Close all sub-channels first
+		 * 2. Then close the primary channel.
+		 */
+		mutex_lock(&vmbus_connection.channel_mutex);
+		vmbus_rescind_cleanup(channel);
+		if (channel->state == CHANNEL_OPEN_STATE) {
+			/*
+			 * The channel is currently not open;
+			 * it is safe for us to cleanup the channel.
+			 */
+			hv_process_channel_removal(rescind->child_relid);
+		}
+		mutex_unlock(&vmbus_connection.channel_mutex);
+	}
 }
 
 void vmbus_hvsock_device_unregister(struct vmbus_channel *channel)
 {
-	mutex_lock(&vmbus_connection.channel_mutex);
-
 	BUG_ON(!is_hvsock_channel(channel));
 
 	channel->rescind = true;
 	vmbus_device_unregister(channel->device_obj);
-
-	mutex_unlock(&vmbus_connection.channel_mutex);
 }
 EXPORT_SYMBOL_GPL(vmbus_hvsock_device_unregister);
 

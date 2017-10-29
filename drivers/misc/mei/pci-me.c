@@ -216,12 +216,21 @@ static int mei_me_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pci_set_drvdata(pdev, dev);
 
 	/*
-	* For not wake-able HW runtime pm framework
-	* can't be used on pci device level.
-	* Use domain runtime pm callbacks instead.
-	*/
-	if (!pci_dev_run_wake(pdev))
-		mei_me_set_pm_domain(dev);
+	 * MEI requires to resume from runtime suspend mode
+	 * in order to perform link reset flow upon system suspend.
+	 */
+	pdev->dev_flags |= PCI_DEV_FLAGS_NEEDS_RESUME;
+
+	/*
+	 * ME maps runtime suspend/resume to D0i states,
+	 * hence we need to go around native PCI runtime service which
+	 * eventually brings the device into D3cold/hot state,
+	 * but the mei device cannot wake up from D3 unlike from D0i3.
+	 * To get around the PCI device native runtime pm,
+	 * ME uses runtime pm domain handlers which take precedence
+	 * over the driver's pm handlers.
+	 */
+	mei_me_set_pm_domain(dev);
 
 	if (mei_pg_is_enabled(dev))
 		pm_runtime_put_noidle(&pdev->dev);
@@ -261,8 +270,7 @@ static void mei_me_shutdown(struct pci_dev *pdev)
 	dev_dbg(&pdev->dev, "shutdown\n");
 	mei_stop(dev);
 
-	if (!pci_dev_run_wake(pdev))
-		mei_me_unset_pm_domain(dev);
+	mei_me_unset_pm_domain(dev);
 
 	mei_disable_interrupts(dev);
 	free_irq(pdev->irq, dev);
@@ -290,8 +298,7 @@ static void mei_me_remove(struct pci_dev *pdev)
 	dev_dbg(&pdev->dev, "stop\n");
 	mei_stop(dev);
 
-	if (!pci_dev_run_wake(pdev))
-		mei_me_unset_pm_domain(dev);
+	mei_me_unset_pm_domain(dev);
 
 	mei_disable_interrupts(dev);
 
