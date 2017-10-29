@@ -298,9 +298,6 @@ static int dw_i2c_plat_probe(struct platform_device *pdev)
 	}
 
 	acpi_speed = i2c_acpi_find_bus_speed(&pdev->dev);
-	/* Some broken DSTDs use 1MiHz instead of 1MHz */
-	if (acpi_speed == 1048576)
-		acpi_speed = 1000000;
 	/*
 	 * Some DSTDs use a non standard speed, round down to the lowest
 	 * standard speed.

@@ -273,8 +273,6 @@ EXPORT_SYMBOL_GPL(cpu_hotplug_enable);
 
 static void __cpuhp_kick_ap_work(struct cpuhp_cpu_state *st);
 
-static void __cpuhp_kick_ap_work(struct cpuhp_cpu_state *st);
-
 static int bringup_wait_for_ap(unsigned int cpu)
 {
 	struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);

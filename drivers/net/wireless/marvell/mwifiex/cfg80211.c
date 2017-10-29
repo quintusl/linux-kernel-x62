@@ -3036,13 +3036,6 @@ struct wireless_dev *mwifiex_add_virtual_intf(struct wiphy *wiphy,
 		goto err_reg_netdev;
 	}
 
-	/* Register network device */
-	if (register_netdevice(dev)) {
-		mwifiex_dbg(adapter, ERROR, "cannot register network device\n");
-		ret = -EFAULT;
-		goto err_reg_netdev;
-	}
-
 	mwifiex_dbg(adapter, INFO,
 		    "info: %s: Marvell 802.11 Adapter\n", dev->name);
 

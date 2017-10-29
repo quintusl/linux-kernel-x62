@@ -137,13 +137,6 @@ static void xhci_pci_quirks(struct device *dev, struct xhci_hcd *xhci)
 	if (pdev->vendor == PCI_VENDOR_ID_AMD)
 		xhci->quirks |= XHCI_TRUST_TX_LENGTH;
 
-	if ((pdev->vendor == PCI_VENDOR_ID_AMD) &&
-		((pdev->device == PCI_DEVICE_ID_AMD_PROMONTORYA_4) ||
-		(pdev->device == PCI_DEVICE_ID_AMD_PROMONTORYA_3) ||
-		(pdev->device == PCI_DEVICE_ID_AMD_PROMONTORYA_2) ||
-		(pdev->device == PCI_DEVICE_ID_AMD_PROMONTORYA_1)))
-		xhci->quirks |= XHCI_U2_DISABLE_WAKE;
-
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL) {
 		xhci->quirks |= XHCI_LPM_SUPPORT;
 		xhci->quirks |= XHCI_INTEL_HOST;

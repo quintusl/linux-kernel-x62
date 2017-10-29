@@ -2300,7 +2300,6 @@ void udp_destroy_sock(struct sock *sk)
 			encap_destroy(sk);
 	}
 }
-EXPORT_SYMBOL(udp_sk_rx_dst_set);
 
 /*
  *	Socket option code for UDP

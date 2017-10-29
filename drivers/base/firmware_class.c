@@ -1186,28 +1186,6 @@ static void fw_abort_batch_reqs(struct firmware *fw)
 		fw_state_aborted(&buf->fw_st);
 }
 
-/*
- * Batched requests need only one wake, we need to do this step last due to the
- * fallback mechanism. The buf is protected with kref_get(), and it won't be
- * released until the last user calls release_firmware().
- *
- * Failed batched requests are possible as well, in such cases we just share
- * the struct firmware_buf and won't release it until all requests are woken
- * and have gone through this same path.
- */
-static void fw_abort_batch_reqs(struct firmware *fw)
-{
-	struct firmware_buf *buf;
-
-	/* Loaded directly? */
-	if (!fw || !fw->priv)
-		return;
-
-	buf = fw->priv;
-	if (!fw_state_is_aborted(&buf->fw_st))
-		fw_state_aborted(&buf->fw_st);
-}
-
 /* called from request_firmware() and request_firmware_work_func() */
 static int
 _request_firmware(const struct firmware **firmware_p, const char *name,

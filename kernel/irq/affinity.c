@@ -117,13 +117,6 @@ irq_create_affinity_masks(int nvecs, const struct irq_affinity *affd)
 	if (!affv)
 		return NULL;
 
-	/*
-	 * If there aren't any vectors left after applying the pre/post
-	 * vectors don't bother with assigning affinity.
-	 */
-	if (!affv)
-		return NULL;
-
 	if (!zalloc_cpumask_var(&nmsk, GFP_KERNEL))
 		return NULL;
 
