@@ -668,8 +668,10 @@ static struct wacom_hdev_data *wacom_get_hdev_data(struct hid_device *hdev)
 
 	/* Try to find an already-probed interface from the same device */
 	list_for_each_entry(data, &wacom_udev_list, list) {
-		if (compare_device_paths(hdev, data->dev, '/'))
+		if (compare_device_paths(hdev, data->dev, '/')) {
+			kref_get(&data->kref);
 			return data;
+		}
 	}
 
 	/* Fallback to finding devices that appear to be "siblings" */
@@ -764,6 +766,9 @@ static int wacom_led_control(struct wacom *wacom)
 	int buf_size = 9;
 
 	if (!wacom->led.groups)
+		return -ENOTSUPP;
+
+	if (wacom->wacom_wac.features.type == REMOTE)
 		return -ENOTSUPP;
 
 	if (wacom->wacom_wac.pid) { /* wireless connected */
@@ -1547,7 +1552,9 @@ static int wacom_battery_get_property(struct power_supply *psy,
 			val->intval = battery->battery_capacity;
 			break;
 		case POWER_SUPPLY_PROP_STATUS:
-			if (battery->bat_charging)
+			if (battery->bat_status != WACOM_POWER_SUPPLY_STATUS_AUTO)
+				val->intval = battery->bat_status;
+			else if (battery->bat_charging)
 				val->intval = POWER_SUPPLY_STATUS_CHARGING;
 			else if (battery->battery_capacity == 100 &&
 				    battery->ps_connected)

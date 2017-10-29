@@ -728,6 +728,8 @@ struct xhci_ep_ctx {
 #define EP_MAXPSTREAMS(p)	(((p) << 10) & EP_MAXPSTREAMS_MASK)
 /* Endpoint is set up with a Linear Stream Array (vs. Secondary Stream Array) */
 #define	EP_HAS_LSA		(1 << 15)
+/* hosts with LEC=1 use bits 31:24 as ESIT high bits. */
+#define CTX_TO_MAX_ESIT_PAYLOAD_HI(p)	(((p) >> 24) & 0xff)
 
 /* ep_info2 bitmasks */
 /*
@@ -924,8 +926,6 @@ struct xhci_virt_ep {
 #define EP_GETTING_NO_STREAMS	(1 << 5)
 	/* ----  Related to URB cancellation ---- */
 	struct list_head	cancelled_td_list;
-	struct xhci_td		*stopped_td;
-	unsigned int		stopped_stream;
 	/* Watchdog timer for stop endpoint command to cancel URBs */
 	struct timer_list	stop_cmd_timer;
 	struct xhci_hcd		*xhci;
@@ -993,10 +993,6 @@ struct xhci_virt_device {
 	struct xhci_container_ctx       *out_ctx;
 	/* Used for addressing devices and configuration changes */
 	struct xhci_container_ctx       *in_ctx;
-	/* Rings saved to ensure old alt settings can be re-instated */
-	struct xhci_ring		**ring_cache;
-	int				num_rings_cached;
-#define	XHCI_MAX_RINGS_CACHED	31
 	struct xhci_virt_ep		eps[31];
 	u8				fake_port;
 	u8				real_port;
@@ -1209,6 +1205,11 @@ struct xhci_event_cmd {
 
 /* Stop Ring - Transfer State Preserve */
 #define TRB_TSP		(1<<9)
+
+enum xhci_ep_reset_type {
+	EP_HARD_RESET,
+	EP_SOFT_RESET,
+};
 
 /* Force Event */
 #define TRB_TO_VF_INTR_TARGET(p)	(((p) & (0x3ff << 22)) >> 22)
@@ -1527,6 +1528,7 @@ struct xhci_dequeue_state {
 	struct xhci_segment *new_deq_seg;
 	union xhci_trb *new_deq_ptr;
 	int new_cycle_state;
+	unsigned int stream_id;
 };
 
 enum xhci_ring_type {
@@ -1674,7 +1676,7 @@ struct xhci_bus_state {
 
 static inline unsigned int hcd_index(struct usb_hcd *hcd)
 {
-	if (hcd->speed == HCD_USB3)
+	if (hcd->speed >= HCD_USB3)
 		return 0;
 	else
 		return 1;
@@ -1819,7 +1821,7 @@ struct xhci_hcd {
 /* For controller with a broken Port Disable implementation */
 #define XHCI_BROKEN_PORT_PED	(1 << 25)
 #define XHCI_LIMIT_ENDPOINT_INTERVAL_7	(1 << 26)
-#define XHCI_U2_DISABLE_WAKE	(1 << 27)
+/* Reserved. It was XHCI_U2_DISABLE_WAKE */
 #define XHCI_ASMEDIA_MODIFY_FLOWCONTROL	(1 << 28)
 
 	unsigned int		num_active_eps;
@@ -1962,7 +1964,7 @@ int xhci_endpoint_init(struct xhci_hcd *xhci, struct xhci_virt_device *virt_dev,
 void xhci_ring_free(struct xhci_hcd *xhci, struct xhci_ring *ring);
 int xhci_ring_expansion(struct xhci_hcd *xhci, struct xhci_ring *ring,
 				unsigned int num_trbs, gfp_t flags);
-void xhci_free_or_cache_endpoint_ring(struct xhci_hcd *xhci,
+void xhci_free_endpoint_ring(struct xhci_hcd *xhci,
 		struct xhci_virt_device *virt_dev,
 		unsigned int ep_index);
 struct xhci_stream_info *xhci_alloc_stream_info(struct xhci_hcd *xhci,
@@ -2046,7 +2048,8 @@ int xhci_queue_configure_endpoint(struct xhci_hcd *xhci,
 int xhci_queue_evaluate_context(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		dma_addr_t in_ctx_ptr, u32 slot_id, bool command_must_succeed);
 int xhci_queue_reset_ep(struct xhci_hcd *xhci, struct xhci_command *cmd,
-		int slot_id, unsigned int ep_index);
+		int slot_id, unsigned int ep_index,
+		enum xhci_ep_reset_type reset_type);
 int xhci_queue_reset_device(struct xhci_hcd *xhci, struct xhci_command *cmd,
 		u32 slot_id);
 void xhci_find_new_dequeue_state(struct xhci_hcd *xhci,
@@ -2055,10 +2058,9 @@ void xhci_find_new_dequeue_state(struct xhci_hcd *xhci,
 		struct xhci_dequeue_state *state);
 void xhci_queue_new_dequeue_state(struct xhci_hcd *xhci,
 		unsigned int slot_id, unsigned int ep_index,
-		unsigned int stream_id,
 		struct xhci_dequeue_state *deq_state);
-void xhci_cleanup_stalled_ring(struct xhci_hcd *xhci,
-		unsigned int ep_index, struct xhci_td *td);
+void xhci_cleanup_stalled_ring(struct xhci_hcd *xhci, unsigned int ep_index,
+		unsigned int stream_id, struct xhci_td *td);
 void xhci_stop_endpoint_command_watchdog(unsigned long arg);
 void xhci_handle_command_timeout(struct work_struct *work);
 
@@ -2452,8 +2454,8 @@ static inline const char *xhci_decode_ep_context(u32 info, u32 info2, u64 deq,
 	u8 lsa;
 	u8 hid;
 
-	esit = EP_MAX_ESIT_PAYLOAD_HI(info) << 16 |
-		EP_MAX_ESIT_PAYLOAD_LO(tx_info);
+	esit = CTX_TO_MAX_ESIT_PAYLOAD_HI(info) << 16 |
+		CTX_TO_MAX_ESIT_PAYLOAD(tx_info);
 
 	ep_state = info & EP_STATE_MASK;
 	max_pstr = info & EP_MAXPSTREAMS_MASK;

@@ -24,7 +24,7 @@
  *
  *
  * libata documentation is available via 'make {ps|pdf}docs',
- * as Documentation/DocBook/libata.*
+ * as Documentation/driver-api/libata.rst
  *
  * AHCI hardware documentation:
  * http://www.intel.com/technology/serialata/pdf/rev1_0.pdf
@@ -548,6 +548,8 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_VDEVICE(ASMEDIA, 0x0602), board_ahci },	/* ASM1060 */
 	{ PCI_VDEVICE(ASMEDIA, 0x0611), board_ahci },	/* ASM1061 */
 	{ PCI_VDEVICE(ASMEDIA, 0x0612), board_ahci },	/* ASM1062 */
+	{ PCI_VDEVICE(ASMEDIA, 0x0621), board_ahci },   /* ASM1061R */
+	{ PCI_VDEVICE(ASMEDIA, 0x0622), board_ahci },   /* ASM1062R */
 
 	/*
 	 * Samsung SSDs found on some macbooks.  NCQ times out if MSI is
@@ -1467,7 +1469,14 @@ static void ahci_remap_check(struct pci_dev *pdev, int bar,
 		return;
 
 	dev_warn(&pdev->dev, "Found %d remapped NVMe devices.\n", count);
-	dev_warn(&pdev->dev, "Switch your BIOS from RAID to AHCI mode to use them.\n");
+	dev_warn(&pdev->dev,
+		 "Switch your BIOS from RAID to AHCI mode to use them.\n");
+
+	/*
+	 * Don't rely on the msi-x capability in the remap case,
+	 * share the legacy interrupt across ahci and remapped devices.
+	 */
+	hpriv->flags |= AHCI_HFLAG_NO_MSI;
 }
 
 static int ahci_get_irq_vector(struct ata_host *host, int port)

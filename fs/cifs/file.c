@@ -224,6 +224,13 @@ cifs_nt_open(char *full_path, struct inode *inode, struct cifs_sb_info *cifs_sb,
 	if (backup_cred(cifs_sb))
 		create_options |= CREATE_OPEN_BACKUP_INTENT;
 
+	/* O_SYNC also has bit for O_DSYNC so following check picks up either */
+	if (f_flags & O_SYNC)
+		create_options |= CREATE_WRITE_THROUGH;
+
+	if (f_flags & O_DIRECT)
+		create_options |= CREATE_NO_BUFFER;
+
 	oparms.tcon = tcon;
 	oparms.cifs_sb = cifs_sb;
 	oparms.desired_access = desired_access;
@@ -2234,14 +2241,16 @@ cifs_writepage_locked(struct page *page, struct writeback_control *wbc)
 	set_page_writeback(page);
 retry_write:
 	rc = cifs_partialpagewrite(page, 0, PAGE_SIZE);
-	if (rc == -EAGAIN && wbc->sync_mode == WB_SYNC_ALL)
-		goto retry_write;
-	else if (rc == -EAGAIN)
+	if (rc == -EAGAIN) {
+		if (wbc->sync_mode == WB_SYNC_ALL)
+			goto retry_write;
 		redirty_page_for_writepage(wbc, page);
-	else if (rc != 0)
+	} else if (rc != 0) {
 		SetPageError(page);
-	else
+		mapping_set_error(page->mapping, rc);
+	} else {
 		SetPageUptodate(page);
+	}
 	end_page_writeback(page);
 	put_page(page);
 	free_xid(xid);
@@ -2810,12 +2819,12 @@ cifs_writev(struct kiocb *iocb, struct iov_iter *from)
 	struct TCP_Server_Info *server = tlink_tcon(cfile->tlink)->ses->server;
 	ssize_t rc;
 
+	inode_lock(inode);
 	/*
 	 * We need to hold the sem to be sure nobody modifies lock list
 	 * with a brlock that prevents writing.
 	 */
 	down_read(&cinode->lock_sem);
-	inode_lock(inode);
 
 	rc = generic_write_checks(iocb, from);
 	if (rc <= 0)
@@ -2828,11 +2837,11 @@ cifs_writev(struct kiocb *iocb, struct iov_iter *from)
 	else
 		rc = -EACCES;
 out:
+	up_read(&cinode->lock_sem);
 	inode_unlock(inode);
 
 	if (rc > 0)
 		rc = generic_write_sync(iocb, rc);
-	up_read(&cinode->lock_sem);
 	return rc;
 }
 

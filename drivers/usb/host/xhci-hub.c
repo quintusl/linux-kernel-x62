@@ -112,7 +112,7 @@ static int xhci_create_usb3_bos_desc(struct xhci_hcd *xhci, char *buf,
 
 	/* If PSI table exists, add the custom speed attributes from it */
 	if (usb3_1 && xhci->usb3_rhub.psi_count) {
-		u32 ssp_cap_base, bm_attrib, psi;
+		u32 ssp_cap_base, bm_attrib, psi, psi_mant, psi_exp;
 		int offset;
 
 		ssp_cap_base = USB_DT_BOS_SIZE + USB_DT_USB_SS_CAP_SIZE;
@@ -139,6 +139,15 @@ static int xhci_create_usb3_bos_desc(struct xhci_hcd *xhci, char *buf,
 		for (i = 0; i < xhci->usb3_rhub.psi_count; i++) {
 			psi = xhci->usb3_rhub.psi[i];
 			psi &= ~USB_SSP_SUBLINK_SPEED_RSVD;
+			psi_exp = XHCI_EXT_PORT_PSIE(psi);
+			psi_mant = XHCI_EXT_PORT_PSIM(psi);
+
+			/* Shift to Gbps and set SSP Link BIT(14) if 10Gpbs */
+			for (; psi_exp < 3; psi_exp++)
+				psi_mant /= 1000;
+			if (psi_mant >= 10)
+				psi |= BIT(14);
+
 			if ((psi & PLT_MASK) == PLT_SYM) {
 			/* Symmetric, create SSA RX and TX from one PSI entry */
 				put_unaligned_le32(psi, &buf[offset]);
@@ -398,20 +407,38 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 	spin_lock_irqsave(&xhci->lock, flags);
 	for (i = LAST_EP_INDEX; i > 0; i--) {
 		if (virt_dev->eps[i].ring && virt_dev->eps[i].ring->dequeue) {
+			struct xhci_ep_ctx *ep_ctx;
 			struct xhci_command *command;
+
+			ep_ctx = xhci_get_ep_ctx(xhci, virt_dev->out_ctx, i);
+
+			/* Check ep is running, required by AMD SNPS 3.1 xHC */
+			if (GET_EP_CTX_STATE(ep_ctx) != EP_STATE_RUNNING)
+				continue;
+
 			command = xhci_alloc_command(xhci, false, false,
 						     GFP_NOWAIT);
 			if (!command) {
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				xhci_free_command(xhci, cmd);
-				return -ENOMEM;
-
+				ret = -ENOMEM;
+				goto cmd_cleanup;
 			}
-			xhci_queue_stop_endpoint(xhci, command, slot_id, i,
-						 suspend);
+
+			ret = xhci_queue_stop_endpoint(xhci, command, slot_id,
+						       i, suspend);
+			if (ret) {
+				spin_unlock_irqrestore(&xhci->lock, flags);
+				xhci_free_command(xhci, command);
+				goto cmd_cleanup;
+			}
 		}
 	}
-	xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
+	ret = xhci_queue_stop_endpoint(xhci, cmd, slot_id, 0, suspend);
+	if (ret) {
+		spin_unlock_irqrestore(&xhci->lock, flags);
+		goto cmd_cleanup;
+	}
+
 	xhci_ring_cmd_db(xhci);
 	spin_unlock_irqrestore(&xhci->lock, flags);
 
@@ -423,6 +450,8 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 		xhci_warn(xhci, "Timeout while waiting for stop endpoint command\n");
 		ret = -ETIME;
 	}
+
+cmd_cleanup:
 	xhci_free_command(xhci, cmd);
 	return ret;
 }

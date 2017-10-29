@@ -812,6 +812,14 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 			spin_unlock(&head->batch_head->batch_lock);
 			goto unlock_out;
 		}
+		/*
+		 * We must assign batch_head of this stripe within the
+		 * batch_lock, otherwise clear_batch_ready of batch head
+		 * stripe could clear BATCH_READY bit of this stripe and
+		 * this stripe->batch_head doesn't get assigned, which
+		 * could confuse clear_batch_ready for this stripe
+		 */
+		sh->batch_head = head->batch_head;
 
 		/*
 		 * at this point, head's BATCH_READY could be cleared, but we
@@ -819,8 +827,6 @@ static void stripe_add_to_batch_list(struct r5conf *conf, struct stripe_head *sh
 		 */
 		list_add(&sh->batch_list, &head->batch_list);
 		spin_unlock(&head->batch_head->batch_lock);
-
-		sh->batch_head = head->batch_head;
 	} else {
 		head->batch_head = head;
 		sh->batch_head = head->batch_head;
@@ -2476,7 +2482,7 @@ static void raid5_end_read_request(struct bio * bi)
 
 	pr_debug("end_read_request %llu/%d, count: %d, error %d.\n",
 		(unsigned long long)sh->sector, i, atomic_read(&sh->count),
-		bi->bi_error);
+		bi->bi_status);
 	if (i == disks) {
 		bio_reset(bi);
 		BUG();
@@ -2496,7 +2502,7 @@ static void raid5_end_read_request(struct bio * bi)
 		s = sh->sector + rdev->new_data_offset;
 	else
 		s = sh->sector + rdev->data_offset;
-	if (!bi->bi_error) {
+	if (!bi->bi_status) {
 		set_bit(R5_UPTODATE, &sh->dev[i].flags);
 		if (test_bit(R5_ReadError, &sh->dev[i].flags)) {
 			/* Note that this cannot happen on a
@@ -2613,7 +2619,7 @@ static void raid5_end_write_request(struct bio *bi)
 	}
 	pr_debug("end_write_request %llu/%d, count %d, error: %d.\n",
 		(unsigned long long)sh->sector, i, atomic_read(&sh->count),
-		bi->bi_error);
+		bi->bi_status);
 	if (i == disks) {
 		bio_reset(bi);
 		BUG();
@@ -2621,14 +2627,14 @@ static void raid5_end_write_request(struct bio *bi)
 	}
 
 	if (replacement) {
-		if (bi->bi_error)
+		if (bi->bi_status)
 			md_error(conf->mddev, rdev);
 		else if (is_badblock(rdev, sh->sector,
 				     STRIPE_SECTORS,
 				     &first_bad, &bad_sectors))
 			set_bit(R5_MadeGoodRepl, &sh->dev[i].flags);
 	} else {
-		if (bi->bi_error) {
+		if (bi->bi_status) {
 			set_bit(STRIPE_DEGRADED, &sh->state);
 			set_bit(WriteErrorSeen, &rdev->flags);
 			set_bit(R5_WriteError, &sh->dev[i].flags);
@@ -2649,7 +2655,7 @@ static void raid5_end_write_request(struct bio *bi)
 	}
 	rdev_dec_pending(rdev, conf->mddev);
 
-	if (sh->batch_head && bi->bi_error && !replacement)
+	if (sh->batch_head && bi->bi_status && !replacement)
 		set_bit(STRIPE_BATCH_ERR, &sh->batch_head->state);
 
 	bio_reset(bi);
@@ -3381,9 +3387,8 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 			sh->dev[i].sector + STRIPE_SECTORS) {
 			struct bio *nextbi = r5_next_bio(bi, sh->dev[i].sector);
 
-			bi->bi_error = -EIO;
 			md_write_end(conf->mddev);
-			bio_endio(bi);
+			bio_io_error(bi);
 			bi = nextbi;
 		}
 		if (bitmap_end)
@@ -3403,9 +3408,8 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 		       sh->dev[i].sector + STRIPE_SECTORS) {
 			struct bio *bi2 = r5_next_bio(bi, sh->dev[i].sector);
 
-			bi->bi_error = -EIO;
 			md_write_end(conf->mddev);
-			bio_endio(bi);
+			bio_io_error(bi);
 			bi = bi2;
 		}
 
@@ -3429,8 +3433,7 @@ handle_failed_stripe(struct r5conf *conf, struct stripe_head *sh,
 				struct bio *nextbi =
 					r5_next_bio(bi, sh->dev[i].sector);
 
-				bi->bi_error = -EIO;
-				bio_endio(bi);
+				bio_io_error(bi);
 				bi = nextbi;
 			}
 		}
@@ -4611,7 +4614,8 @@ static void break_stripe_batch_list(struct stripe_head *head_sh,
 
 		set_mask_bits(&sh->state, ~(STRIPE_EXPAND_SYNC_FLAGS |
 					    (1 << STRIPE_PREREAD_ACTIVE) |
-					    (1 << STRIPE_DEGRADED)),
+					    (1 << STRIPE_DEGRADED) |
+					    (1 << STRIPE_ON_UNPLUG_LIST)),
 			      head_sh->state & (1 << STRIPE_INSYNC));
 
 		sh->check_state = head_sh->check_state;
@@ -5154,7 +5158,7 @@ static void raid5_align_endio(struct bio *bi)
 	struct mddev *mddev;
 	struct r5conf *conf;
 	struct md_rdev *rdev;
-	int error = bi->bi_error;
+	blk_status_t error = bi->bi_status;
 
 	bio_put(bi);
 
@@ -5734,7 +5738,7 @@ static bool raid5_make_request(struct mddev *mddev, struct bio * bi)
 			release_stripe_plug(mddev, sh);
 		} else {
 			/* cannot get stripe for read-ahead, just give-up */
-			bi->bi_error = -EIO;
+			bi->bi_status = BLK_STS_IOERR;
 			break;
 		}
 	}
@@ -6237,6 +6241,10 @@ static void raid5_do_work(struct work_struct *work)
 	pr_debug("%d stripes handled\n", handled);
 
 	spin_unlock_irq(&conf->device_lock);
+
+	flush_deferred_bios(conf);
+
+	r5l_flush_stripe_to_raid(conf->log);
 
 	async_tx_issue_pending_all();
 	blk_finish_plug(&plug);
@@ -6949,7 +6957,7 @@ static struct r5conf *setup_conf(struct mddev *mddev)
 			goto abort;
 	}
 
-	conf->bio_split = bioset_create(BIO_POOL_SIZE, 0);
+	conf->bio_split = bioset_create(BIO_POOL_SIZE, 0, 0);
 	if (!conf->bio_split)
 		goto abort;
 	conf->mddev = mddev;

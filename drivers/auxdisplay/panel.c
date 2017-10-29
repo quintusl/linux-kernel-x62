@@ -1105,14 +1105,21 @@ static ssize_t keypad_read(struct file *file,
 
 static int keypad_open(struct inode *inode, struct file *file)
 {
-	if (!atomic_dec_and_test(&keypad_available))
-		return -EBUSY;	/* open only once at a time */
+	int ret;
 
+	ret = -EBUSY;
+	if (!atomic_dec_and_test(&keypad_available))
+		goto fail;	/* open only once at a time */
+
+	ret = -EPERM;
 	if (file->f_mode & FMODE_WRITE)	/* device is read-only */
-		return -EPERM;
+		goto fail;
 
 	keypad_buflen = 0;	/* flush the buffer on opening */
 	return 0;
+ fail:
+	atomic_inc(&keypad_available);
+	return ret;
 }
 
 static int keypad_release(struct inode *inode, struct file *file)
@@ -1345,14 +1352,11 @@ static inline void input_state_falling(struct logical_input *input)
 
 static void panel_process_inputs(void)
 {
-	struct list_head *item;
 	struct logical_input *input;
 
 	keypressed = 0;
 	inputs_stable = 1;
-	list_for_each(item, &logical_inputs) {
-		input = list_entry(item, struct logical_input, list);
-
+	list_for_each_entry(input, &logical_inputs, list) {
 		switch (input->state) {
 		case INPUT_ST_LOW:
 			if ((phys_curr & input->mask) != input->value)

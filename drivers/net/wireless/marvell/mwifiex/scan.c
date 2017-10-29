@@ -2492,6 +2492,12 @@ mwifiex_update_chan_statistics(struct mwifiex_private *priv,
 					      sizeof(struct mwifiex_chan_stats);
 
 	for (i = 0 ; i < num_chan; i++) {
+		if (adapter->survey_idx >= adapter->num_in_chan_stats) {
+			mwifiex_dbg(adapter, WARN,
+				    "FW reported too many channel results (max %d)\n",
+				    adapter->num_in_chan_stats);
+			return;
+		}
 		chan_stats.chan_num = fw_chan_stats->chan_num;
 		chan_stats.bandcfg = fw_chan_stats->bandcfg;
 		chan_stats.flags = fw_chan_stats->flags;
@@ -2809,7 +2815,7 @@ int mwifiex_request_scan(struct mwifiex_private *priv,
 {
 	int ret;
 
-	if (down_interruptible(&priv->async_sem)) {
+	if (mutex_lock_interruptible(&priv->async_mutex)) {
 		mwifiex_dbg(priv->adapter, ERROR,
 			    "%s: acquire semaphore fail\n",
 			    __func__);
@@ -2825,7 +2831,7 @@ int mwifiex_request_scan(struct mwifiex_private *priv,
 		/* Normal scan */
 		ret = mwifiex_scan_networks(priv, NULL);
 
-	up(&priv->async_sem);
+	mutex_unlock(&priv->async_mutex);
 
 	return ret;
 }

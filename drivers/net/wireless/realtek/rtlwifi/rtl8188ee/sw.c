@@ -175,6 +175,8 @@ int rtl88e_init_sw_vars(struct ieee80211_hw *hw)
 				      rtl_fw_cb);
 	if (err) {
 		pr_info("Failed to request firmware!\n");
+		vfree(rtlpriv->rtlhal.pfirmware);
+		rtlpriv->rtlhal.pfirmware = NULL;
 		return 1;
 	}
 
@@ -270,7 +272,7 @@ static struct rtl_hal_ops rtl8188ee_hal_ops = {
 
 static struct rtl_mod_params rtl88ee_mod_params = {
 	.sw_crypto = false,
-	.inactiveps = false,
+	.inactiveps = true,
 	.swctrl_lps = false,
 	.fwctrl_lps = false,
 	.msi_support = true,

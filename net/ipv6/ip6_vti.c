@@ -445,6 +445,7 @@ vti6_xmit(struct sk_buff *skb, struct net_device *dev, struct flowi *fl)
 	struct dst_entry *dst = skb_dst(skb);
 	struct net_device *tdev;
 	struct xfrm_state *x;
+	int pkt_len = skb->len;
 	int err = -1;
 	int mtu;
 
@@ -502,7 +503,7 @@ vti6_xmit(struct sk_buff *skb, struct net_device *dev, struct flowi *fl)
 		struct pcpu_sw_netstats *tstats = this_cpu_ptr(dev->tstats);
 
 		u64_stats_update_begin(&tstats->syncp);
-		tstats->tx_bytes += skb->len;
+		tstats->tx_bytes += pkt_len;
 		tstats->tx_packets++;
 		u64_stats_update_end(&tstats->syncp);
 	} else {
@@ -907,7 +908,8 @@ static int __net_init vti6_fb_tnl_dev_init(struct net_device *dev)
 	return 0;
 }
 
-static int vti6_validate(struct nlattr *tb[], struct nlattr *data[])
+static int vti6_validate(struct nlattr *tb[], struct nlattr *data[],
+			 struct netlink_ext_ack *extack)
 {
 	return 0;
 }
@@ -940,7 +942,8 @@ static void vti6_netlink_parms(struct nlattr *data[],
 }
 
 static int vti6_newlink(struct net *src_net, struct net_device *dev,
-			struct nlattr *tb[], struct nlattr *data[])
+			struct nlattr *tb[], struct nlattr *data[],
+			struct netlink_ext_ack *extack)
 {
 	struct net *net = dev_net(dev);
 	struct ip6_tnl *nt;
@@ -966,7 +969,8 @@ static void vti6_dellink(struct net_device *dev, struct list_head *head)
 }
 
 static int vti6_changelink(struct net_device *dev, struct nlattr *tb[],
-			   struct nlattr *data[])
+			   struct nlattr *data[],
+			   struct netlink_ext_ack *extack)
 {
 	struct ip6_tnl *t;
 	struct __ip6_tnl_parm p;
