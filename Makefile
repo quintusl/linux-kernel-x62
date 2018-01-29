@@ -3,7 +3,7 @@ VERSION = 4
 PATCHLEVEL = 15
 SUBLEVEL = 0
 EXTRAVERSION =
-NAME = Petit Gorille
+NAME = Fearless Coyote
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
