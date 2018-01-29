@@ -66,11 +66,9 @@ radix__hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 			return -ENOMEM;
 	}
 
-	if (unlikely(addr > mm->context.addr_limit &&
-		     mm->context.addr_limit != TASK_SIZE))
-		mm->context.addr_limit = TASK_SIZE;
-
 	if (fixed) {
+		if (addr > high_limit - len)
+			return -ENOMEM;
 		if (prepare_hugepage_range(file, addr, len))
 			return -EINVAL;
 		return addr;
