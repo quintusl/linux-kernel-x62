@@ -64,6 +64,9 @@ int nfsd_setuser(struct svc_rqst *rqstp, struct svc_export *exp)
 			/* Each thread allocates its own gi, no race */
 			groups_sort(gi);
 		}
+
+		/* Each thread allocates its own gi, no race */
+		groups_sort(gi);
 	} else {
 		gi = get_group_info(rqgi);
 	}
