@@ -1102,29 +1102,6 @@ static void coerce_reg_to_size(struct bpf_reg_state *reg, int size)
 	reg->smax_value = reg->umax_value;
 }
 
-/* truncate register to smaller size (in bytes)
- * must be called with size < BPF_REG_SIZE
- */
-static void coerce_reg_to_size(struct bpf_reg_state *reg, int size)
-{
-	u64 mask;
-
-	/* clear high bits in bit representation */
-	reg->var_off = tnum_cast(reg->var_off, size);
-
-	/* fix arithmetic bounds */
-	mask = ((u64)1 << (size * 8)) - 1;
-	if ((reg->umin_value & ~mask) == (reg->umax_value & ~mask)) {
-		reg->umin_value &= mask;
-		reg->umax_value &= mask;
-	} else {
-		reg->umin_value = 0;
-		reg->umax_value = mask;
-	}
-	reg->smin_value = reg->umin_value;
-	reg->smax_value = reg->umax_value;
-}
-
 /* check whether memory at (regno + off) is accessible for t = (read | write)
  * if t==write, value_regno is a register which value is stored into memory
  * if t==read, value_regno is a register which will receive the value from memory
@@ -2536,11 +2513,6 @@ static int check_alu_op(struct bpf_verifier_env *env, struct bpf_insn *insn)
 
 		if (opcode == BPF_ARSH && BPF_CLASS(insn->code) != BPF_ALU64) {
 			verbose(env, "BPF_ARSH not supported for 32 bit ALU\n");
-			return -EINVAL;
-		}
-
-		if (opcode == BPF_ARSH && BPF_CLASS(insn->code) != BPF_ALU64) {
-			verbose("BPF_ARSH not supported for 32 bit ALU\n");
 			return -EINVAL;
 		}
 

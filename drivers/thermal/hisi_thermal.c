@@ -494,7 +494,7 @@ static int hisi_thermal_register_sensor(struct platform_device *pdev,
 
 	for (i = 0; i < of_thermal_get_ntrips(sensor->tzd); i++) {
 		if (trip[i].type == THERMAL_TRIP_PASSIVE) {
-			sensor->thres_temp = hisi_thermal_round_temp(trip[i].temperature);
+			sensor->thres_temp = trip[i].temperature;
 			break;
 		}
 	}
