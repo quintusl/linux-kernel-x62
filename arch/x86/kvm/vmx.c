@@ -10888,9 +10888,6 @@ static int prepare_vmcs02(struct kvm_vcpu *vcpu, struct vmcs12 *vmcs12,
 	if (kvm_has_tsc_control)
 		decache_tsc_multiplier(vmx);
 
-	if (cpu_has_vmx_msr_bitmap())
-		vmcs_write64(MSR_BITMAP, __pa(vmx->nested.vmcs02.msr_bitmap));
-
 	if (enable_vpid) {
 		/*
 		 * There is no direct mapping between vpid02 and vpid12, the
