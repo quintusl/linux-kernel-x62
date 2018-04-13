@@ -758,7 +758,6 @@ static int cc_cipher_decrypt(struct ablkcipher_request *req)
 	scatterwalk_map_and_copy(req_ctx->backup_info, req->src,
 				 (req->nbytes - ivsize), ivsize, 0);
 	req_ctx->is_giv = false;
-	req_ctx->backup_info = NULL;
 
 	return cc_cipher_process(req, DRV_CRYPTO_DIRECTION_DECRYPT);
 }

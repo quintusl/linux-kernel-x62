@@ -616,16 +616,6 @@ static int ovl_inode_set(struct inode *inode, void *data)
 static bool ovl_verify_inode(struct inode *inode, struct dentry *lowerdentry,
 			     struct dentry *upperdentry, bool strict)
 {
-	if (S_ISDIR(inode->i_mode)) {
-		/* Real lower dir moved to upper layer under us? */
-		if (!lowerdentry && ovl_inode_lower(inode))
-			return false;
-
-		/* Lookup of an uncovered redirect origin? */
-		if (!upperdentry && ovl_inode_upper(inode))
-			return false;
-	}
-
 	/*
 	 * For directories, @strict verify from lookup path performs consistency
 	 * checks, so NULL lower/upper in dentry must match NULL lower/upper in

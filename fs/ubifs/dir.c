@@ -1224,7 +1224,6 @@ out_fname:
 	fscrypt_free_filename(&nm);
 out_budg:
 	ubifs_release_budget(c, &req);
-	kfree(sd);
 	return err;
 }
 

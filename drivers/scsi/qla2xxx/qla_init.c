@@ -1007,11 +1007,9 @@ static
 void __qla24xx_handle_gpdb_event(scsi_qla_host_t *vha, struct event_arg *ea)
 {
 	unsigned long flags;
-	u16 opt = ea->sp->u.iocb_cmd.u.mbx.out_mb[10];
 
 	spin_lock_irqsave(&vha->hw->tgt.sess_lock, flags);
-	if (opt != PDO_FORCE_ADISC)
-		ea->fcport->login_gen++;
+	ea->fcport->login_gen++;
 	ea->fcport->deleted = 0;
 	ea->fcport->logout_on_delete = 1;
 
