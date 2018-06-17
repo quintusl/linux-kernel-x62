@@ -171,7 +171,7 @@ static void free_nh_exceptions(struct fib_nh *nh)
 		fnhe = rcu_dereference_protected(hash[i].chain, 1);
 		while (fnhe) {
 			struct fib_nh_exception *next;
-			
+
 			next = rcu_dereference_protected(fnhe->fnhe_next, 1);
 
 			rt_fibinfo_free(&fnhe->fnhe_rth_input);
@@ -717,6 +717,8 @@ bool fib_metrics_match(struct fib_config *cfg, struct fib_info *fi)
 			nla_strlcpy(tmp, nla, sizeof(tmp));
 			val = tcp_ca_get_key_by_name(fi->fib_net, tmp, &ecn_ca);
 		} else {
+			if (nla_len(nla) != sizeof(u32))
+				return false;
 			val = nla_get_u32(nla);
 		}
 
@@ -1043,6 +1045,8 @@ fib_convert_metrics(struct fib_info *fi, const struct fib_config *cfg)
 			if (val == TCP_CA_UNSPEC)
 				return -EINVAL;
 		} else {
+			if (nla_len(nla) != sizeof(u32))
+				return -EINVAL;
 			val = nla_get_u32(nla);
 		}
 		if (type == RTAX_ADVMSS && val > 65535 - 40)
@@ -1746,18 +1750,20 @@ void fib_select_multipath(struct fib_result *res, int hash)
 	bool first = false;
 
 	for_nexthops(fi) {
+		if (net->ipv4.sysctl_fib_multipath_use_neigh) {
+			if (!fib_good_nh(nh))
+				continue;
+			if (!first) {
+				res->nh_sel = nhsel;
+				first = true;
+			}
+		}
+
 		if (hash > atomic_read(&nh->nh_upper_bound))
 			continue;
 
-		if (!net->ipv4.sysctl_fib_multipath_use_neigh ||
-		    fib_good_nh(nh)) {
-			res->nh_sel = nhsel;
-			return;
-		}
-		if (!first) {
-			res->nh_sel = nhsel;
-			first = true;
-		}
+		res->nh_sel = nhsel;
+		return;
 	} endfor_nexthops(fi);
 }
 #endif
@@ -1765,14 +1771,12 @@ void fib_select_multipath(struct fib_result *res, int hash)
 void fib_select_path(struct net *net, struct fib_result *res,
 		     struct flowi4 *fl4, const struct sk_buff *skb)
 {
-	bool oif_check;
-
-	oif_check = (fl4->flowi4_oif == 0 ||
-		     fl4->flowi4_flags & FLOWI_FLAG_SKIP_NH_OIF);
+	if (fl4->flowi4_oif && !(fl4->flowi4_flags & FLOWI_FLAG_SKIP_NH_OIF))
+		goto check_saddr;
 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	if (res->fi->fib_nhs > 1 && oif_check) {
-		int h = fib_multipath_hash(res->fi, fl4, skb);
+	if (res->fi->fib_nhs > 1) {
+		int h = fib_multipath_hash(net, fl4, skb, NULL);
 
 		fib_select_multipath(res, h);
 	}
@@ -1780,10 +1784,10 @@ void fib_select_path(struct net *net, struct fib_result *res,
 #endif
 	if (!res->prefixlen &&
 	    res->table->tb_num_default > 1 &&
-	    res->type == RTN_UNICAST && oif_check)
+	    res->type == RTN_UNICAST)
 		fib_select_default(fl4, res);
 
+check_saddr:
 	if (!fl4->saddr)
 		fl4->saddr = FIB_RES_PREFSRC(net, *res);
 }
-EXPORT_SYMBOL_GPL(fib_select_path);
