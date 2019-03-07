@@ -653,15 +653,22 @@ static int ax25_setsockopt(struct socket *sock, int level, int optname,
 			break;
 		}
 
-		dev = dev_get_by_name(&init_net, devname);
+		rtnl_lock();
+		dev = __dev_get_by_name(&init_net, devname);
 		if (!dev) {
+			rtnl_unlock();
 			res = -ENODEV;
 			break;
 		}
 
 		ax25->ax25_dev = ax25_dev_ax25dev(dev);
+		if (!ax25->ax25_dev) {
+			rtnl_unlock();
+			res = -ENODEV;
+			break;
+		}
 		ax25_fillin_cb(ax25, ax25->ax25_dev);
-		dev_put(dev);
+		rtnl_unlock();
 		break;
 
 	default:
@@ -1924,19 +1931,6 @@ static const struct seq_operations ax25_info_seqops = {
 	.stop = ax25_info_stop,
 	.show = ax25_info_show,
 };
-
-static int ax25_info_open(struct inode *inode, struct file *file)
-{
-	return seq_open(file, &ax25_info_seqops);
-}
-
-static const struct file_operations ax25_info_fops = {
-	.open = ax25_info_open,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.release = seq_release,
-};
-
 #endif
 
 static const struct net_proto_family ax25_family_ops = {
@@ -1989,10 +1983,10 @@ static int __init ax25_init(void)
 	dev_add_pack(&ax25_packet_type);
 	register_netdevice_notifier(&ax25_dev_notifier);
 
-	proc_create("ax25_route", 0444, init_net.proc_net,
-		    &ax25_route_fops);
-	proc_create("ax25", 0444, init_net.proc_net, &ax25_info_fops);
-	proc_create("ax25_calls", 0444, init_net.proc_net, &ax25_uid_fops);
+	proc_create_seq("ax25_route", 0444, init_net.proc_net, &ax25_rt_seqops);
+	proc_create_seq("ax25", 0444, init_net.proc_net, &ax25_info_seqops);
+	proc_create_seq("ax25_calls", 0444, init_net.proc_net,
+			&ax25_uid_seqops);
 out:
 	return rc;
 }

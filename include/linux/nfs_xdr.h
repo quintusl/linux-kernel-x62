@@ -259,6 +259,7 @@ struct nfs4_layoutget_args {
 
 struct nfs4_layoutget_res {
 	struct nfs4_sequence_res seq_res;
+	int status;
 	__u32 return_on_close;
 	struct pnfs_layout_range range;
 	__u32 type;
@@ -269,7 +270,7 @@ struct nfs4_layoutget_res {
 struct nfs4_layoutget {
 	struct nfs4_layoutget_args args;
 	struct nfs4_layoutget_res res;
-	struct rpc_cred *cred;
+	const struct cred *cred;
 	gfp_t gfp_flags;
 };
 
@@ -308,7 +309,7 @@ struct nfs4_layoutcommit_data {
 	struct rpc_task task;
 	struct nfs_fattr fattr;
 	struct list_head lseg_list;
-	struct rpc_cred *cred;
+	const struct cred *cred;
 	struct inode *inode;
 	struct nfs4_layoutcommit_args args;
 	struct nfs4_layoutcommit_res res;
@@ -333,7 +334,7 @@ struct nfs4_layoutreturn_res {
 struct nfs4_layoutreturn {
 	struct nfs4_layoutreturn_args args;
 	struct nfs4_layoutreturn_res res;
-	struct rpc_cred *cred;
+	const struct cred *cred;
 	struct nfs_client *clp;
 	struct inode *inode;
 	int rpc_status;
@@ -435,6 +436,7 @@ struct nfs_openargs {
 	enum createmode4	createmode;
 	const struct nfs4_label *label;
 	umode_t			umask;
+	struct nfs4_layoutget_args *lg_args;
 };
 
 struct nfs_openres {
@@ -457,6 +459,7 @@ struct nfs_openres {
 	__u32			access_request;
 	__u32			access_supported;
 	__u32			access_result;
+	struct nfs4_layoutget_res *lg_res;
 };
 
 /*
@@ -605,8 +608,13 @@ struct nfs_pgio_args {
 	__u32			count;
 	unsigned int		pgbase;
 	struct page **		pages;
-	const u32 *		bitmask;	/* used by write */
-	enum nfs3_stable_how	stable;		/* used by write */
+	union {
+		unsigned int		replen;			/* used by read */
+		struct {
+			const u32 *		bitmask;	/* used by write */
+			enum nfs3_stable_how	stable;		/* used by write */
+		};
+	};
 };
 
 struct nfs_pgio_res {
@@ -614,10 +622,16 @@ struct nfs_pgio_res {
 	struct nfs_fattr *	fattr;
 	__u32			count;
 	__u32			op_status;
-	int			eof;		/* used by read */
-	struct nfs_writeverf *	verf;		/* used by write */
-	const struct nfs_server *server;	/* used by write */
-
+	union {
+		struct {
+			unsigned int		replen;		/* used by read */
+			int			eof;		/* used by read */
+		};
+		struct {
+			struct nfs_writeverf *	verf;		/* used by write */
+			const struct nfs_server *server;	/* used by write */
+		};
+	};
 };
 
 /*
@@ -1385,9 +1399,11 @@ struct nfs42_copy_args {
 	u64				dst_pos;
 
 	u64				count;
+	bool				sync;
 };
 
 struct nfs42_write_res {
+	nfs4_stateid		stateid;
 	u64			count;
 	struct nfs_writeverf	verifier;
 };
@@ -1398,6 +1414,18 @@ struct nfs42_copy_res {
 	bool				consecutive;
 	bool				synchronous;
 	struct nfs_commitres		commit_res;
+};
+
+struct nfs42_offload_status_args {
+	struct nfs4_sequence_args	osa_seq_args;
+	struct nfs_fh			*osa_src_fh;
+	nfs4_stateid			osa_stateid;
+};
+
+struct nfs42_offload_status_res {
+	struct nfs4_sequence_res	osr_seq_res;
+	uint64_t			osr_count;
+	int				osr_status;
 };
 
 struct nfs42_seek_args {
@@ -1434,12 +1462,14 @@ enum {
 	NFS_IOHDR_EOF,
 	NFS_IOHDR_REDO,
 	NFS_IOHDR_STAT,
+	NFS_IOHDR_RESEND_PNFS,
+	NFS_IOHDR_RESEND_MDS,
 };
 
 struct nfs_io_completion;
 struct nfs_pgio_header {
 	struct inode		*inode;
-	struct rpc_cred		*cred;
+	const struct cred		*cred;
 	struct list_head	pages;
 	struct nfs_page		*req;
 	struct nfs_writeverf	verf;		/* Used for writes */
@@ -1452,11 +1482,10 @@ struct nfs_pgio_header {
 	const struct nfs_rw_ops	*rw_ops;
 	struct nfs_io_completion *io_completion;
 	struct nfs_direct_req	*dreq;
-	spinlock_t		lock;
-	/* fields protected by lock */
+
 	int			pnfs_error;
 	int			error;		/* merge with pnfs_error */
-	unsigned long		good_bytes;	/* boundary of good data */
+	unsigned int		good_bytes;	/* boundary of good data */
 	unsigned long		flags;
 
 	/*
@@ -1500,7 +1529,7 @@ struct nfs_commit_info {
 struct nfs_commit_data {
 	struct rpc_task		task;
 	struct inode		*inode;
-	struct rpc_cred		*cred;
+	const struct cred		*cred;
 	struct nfs_fattr	fattr;
 	struct nfs_writeverf	verf;
 	struct list_head	pages;		/* Coalesced requests we wish to flush */
@@ -1531,7 +1560,7 @@ struct nfs_unlinkdata {
 	struct nfs_removeres res;
 	struct dentry *dentry;
 	wait_queue_head_t wq;
-	struct rpc_cred	*cred;
+	const struct cred *cred;
 	struct nfs_fattr dir_attr;
 	long timeout;
 };
@@ -1539,7 +1568,7 @@ struct nfs_unlinkdata {
 struct nfs_renamedata {
 	struct nfs_renameargs	args;
 	struct nfs_renameres	res;
-	struct rpc_cred		*cred;
+	const struct cred	*cred;
 	struct inode		*old_dir;
 	struct dentry		*old_dentry;
 	struct nfs_fattr	old_fattr;
@@ -1577,7 +1606,8 @@ struct nfs_rpc_ops {
 	struct dentry *(*try_mount) (int, const char *, struct nfs_mount_info *,
 				     struct nfs_subversion *);
 	int	(*getattr) (struct nfs_server *, struct nfs_fh *,
-			    struct nfs_fattr *, struct nfs4_label *);
+			    struct nfs_fattr *, struct nfs4_label *,
+			    struct inode *);
 	int	(*setattr) (struct dentry *, struct nfs_fattr *,
 			    struct iattr *);
 	int	(*lookup)  (struct inode *, const struct qstr *,
@@ -1591,7 +1621,7 @@ struct nfs_rpc_ops {
 	int	(*create)  (struct inode *, struct dentry *,
 			    struct iattr *, int);
 	int	(*remove)  (struct inode *, struct dentry *);
-	void	(*unlink_setup)  (struct rpc_message *, struct dentry *);
+	void	(*unlink_setup)  (struct rpc_message *, struct dentry *, struct inode *);
 	void	(*unlink_rpc_prepare) (struct rpc_task *, struct nfs_unlinkdata *);
 	int	(*unlink_done) (struct rpc_task *, struct inode *);
 	void	(*rename_setup)  (struct rpc_message *msg,
@@ -1604,7 +1634,7 @@ struct nfs_rpc_ops {
 			    unsigned int, struct iattr *);
 	int	(*mkdir)   (struct inode *, struct dentry *, struct iattr *);
 	int	(*rmdir)   (struct inode *, const struct qstr *);
-	int	(*readdir) (struct dentry *, struct rpc_cred *,
+	int	(*readdir) (struct dentry *, const struct cred *,
 			    u64, struct page **, unsigned int, bool);
 	int	(*mknod)   (struct inode *, struct dentry *, struct iattr *,
 			    dev_t);
@@ -1620,9 +1650,11 @@ struct nfs_rpc_ops {
 				    struct nfs_pgio_header *);
 	void	(*read_setup)(struct nfs_pgio_header *, struct rpc_message *);
 	int	(*read_done)(struct rpc_task *, struct nfs_pgio_header *);
-	void	(*write_setup)(struct nfs_pgio_header *, struct rpc_message *);
+	void	(*write_setup)(struct nfs_pgio_header *, struct rpc_message *,
+				struct rpc_clnt **);
 	int	(*write_done)(struct rpc_task *, struct nfs_pgio_header *);
-	void	(*commit_setup) (struct nfs_commit_data *, struct rpc_message *);
+	void	(*commit_setup) (struct nfs_commit_data *, struct rpc_message *,
+				struct rpc_clnt **);
 	void	(*commit_rpc_prepare)(struct rpc_task *, struct nfs_commit_data *);
 	int	(*commit_done) (struct rpc_task *, struct nfs_commit_data *);
 	int	(*lock)(struct file *, int, struct file_lock *);

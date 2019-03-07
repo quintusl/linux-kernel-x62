@@ -1,4 +1,3 @@
-#include <linux/seq_file.h>
 #include <linux/cpumask.h>
 #include <linux/kernel.h>
 #include <linux/string.h>
@@ -154,11 +153,6 @@ void panic_if_irq_remap(const char *msg)
 {
 	if (irq_remapping_enabled)
 		panic(msg);
-}
-
-void ir_ack_apic_edge(struct irq_data *data)
-{
-	ack_APIC_irq();
 }
 
 /**

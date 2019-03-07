@@ -110,6 +110,15 @@ static inline bool is_la57_mode(struct kvm_vcpu *vcpu)
 #endif
 }
 
+static inline bool x86_exception_has_error_code(unsigned int vector)
+{
+	static u32 exception_has_error_code = BIT(DF_VECTOR) | BIT(TS_VECTOR) |
+			BIT(NP_VECTOR) | BIT(SS_VECTOR) | BIT(GP_VECTOR) |
+			BIT(PF_VECTOR) | BIT(AC_VECTOR);
+
+	return (1U << vector) & exception_has_error_code;
+}
+
 static inline bool mmu_is_nested(struct kvm_vcpu *vcpu)
 {
 	return vcpu->arch.walk_mmu == &vcpu->arch.nested_mmu;
@@ -257,6 +266,8 @@ int kvm_write_guest_virt_system(struct kvm_vcpu *vcpu,
 
 int handle_ud(struct kvm_vcpu *vcpu);
 
+void kvm_deliver_exception_payload(struct kvm_vcpu *vcpu);
+
 void kvm_vcpu_mtrr_init(struct kvm_vcpu *vcpu);
 u8 kvm_mtrr_get_guest_memory_type(struct kvm_vcpu *vcpu, gfn_t gfn);
 bool kvm_mtrr_valid(struct kvm_vcpu *vcpu, u32 msr, u64 data);
@@ -265,6 +276,8 @@ int kvm_mtrr_get_msr(struct kvm_vcpu *vcpu, u32 msr, u64 *pdata);
 bool kvm_mtrr_check_gfn_range_consistency(struct kvm_vcpu *vcpu, gfn_t gfn,
 					  int page_num);
 bool kvm_vector_hashing_enabled(void);
+int x86_emulate_instruction(struct kvm_vcpu *vcpu, unsigned long cr2,
+			    int emulation_type, void *insn, int insn_len);
 
 #define KVM_SUPPORTED_XCR0     (XFEATURE_MASK_FP | XFEATURE_MASK_SSE \
 				| XFEATURE_MASK_YMM | XFEATURE_MASK_BNDREGS \

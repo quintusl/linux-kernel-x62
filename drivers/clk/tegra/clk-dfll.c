@@ -1184,54 +1184,26 @@ static int attr_registers_show(struct seq_file *s, void *data)
 	return 0;
 }
 
-static int attr_registers_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, attr_registers_show, inode->i_private);
-}
+DEFINE_SHOW_ATTRIBUTE(attr_registers);
 
-static const struct file_operations attr_registers_fops = {
-	.open		= attr_registers_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= single_release,
-};
-
-static int dfll_debug_init(struct tegra_dfll *td)
+static void dfll_debug_init(struct tegra_dfll *td)
 {
-	int ret;
+	struct dentry *root;
 
 	if (!td || (td->mode == DFLL_UNINITIALIZED))
-		return 0;
+		return;
 
-	td->debugfs_dir = debugfs_create_dir("tegra_dfll_fcpu", NULL);
-	if (!td->debugfs_dir)
-		return -ENOMEM;
+	root = debugfs_create_dir("tegra_dfll_fcpu", NULL);
+	td->debugfs_dir = root;
 
-	ret = -ENOMEM;
-
-	if (!debugfs_create_file("enable", S_IRUGO | S_IWUSR,
-				 td->debugfs_dir, td, &enable_fops))
-		goto err_out;
-
-	if (!debugfs_create_file("lock", S_IRUGO,
-				 td->debugfs_dir, td, &lock_fops))
-		goto err_out;
-
-	if (!debugfs_create_file("rate", S_IRUGO,
-				 td->debugfs_dir, td, &rate_fops))
-		goto err_out;
-
-	if (!debugfs_create_file("registers", S_IRUGO,
-				 td->debugfs_dir, td, &attr_registers_fops))
-		goto err_out;
-
-	return 0;
-
-err_out:
-	debugfs_remove_recursive(td->debugfs_dir);
-	return ret;
+	debugfs_create_file("enable", S_IRUGO | S_IWUSR, root, td, &enable_fops);
+	debugfs_create_file("lock", S_IRUGO, root, td, &lock_fops);
+	debugfs_create_file("rate", S_IRUGO, root, td, &rate_fops);
+	debugfs_create_file("registers", S_IRUGO, root, td, &attr_registers_fops);
 }
 
+#else
+static void inline dfll_debug_init(struct tegra_dfll *td) { }
 #endif /* CONFIG_DEBUG_FS */
 
 /*
@@ -1627,8 +1599,12 @@ int tegra_dfll_register(struct platform_device *pdev,
 
 	td->vdd_reg = devm_regulator_get(td->dev, "vdd-cpu");
 	if (IS_ERR(td->vdd_reg)) {
-		dev_err(td->dev, "couldn't get vdd_cpu regulator\n");
-		return PTR_ERR(td->vdd_reg);
+		ret = PTR_ERR(td->vdd_reg);
+		if (ret != -EPROBE_DEFER)
+			dev_err(td->dev, "couldn't get vdd_cpu regulator: %d\n",
+				ret);
+
+		return ret;
 	}
 
 	td->dvco_rst = devm_reset_control_get(td->dev, "dvco");
@@ -1715,9 +1691,7 @@ int tegra_dfll_register(struct platform_device *pdev,
 		return ret;
 	}
 
-#ifdef CONFIG_DEBUG_FS
 	dfll_debug_init(td);
-#endif
 
 	return 0;
 }

@@ -131,8 +131,7 @@ static ssize_t arm_spe_pmu_cap_show(struct device *dev,
 				    struct device_attribute *attr,
 				    char *buf)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct arm_spe_pmu *spe_pmu = platform_get_drvdata(pdev);
+	struct arm_spe_pmu *spe_pmu = dev_get_drvdata(dev);
 	struct dev_ext_attribute *ea =
 		container_of(attr, struct dev_ext_attribute, attr);
 	int cap = (long)ea->var;
@@ -247,8 +246,7 @@ static ssize_t arm_spe_pmu_get_attr_cpumask(struct device *dev,
 					    struct device_attribute *attr,
 					    char *buf)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct arm_spe_pmu *spe_pmu = platform_get_drvdata(pdev);
+	struct arm_spe_pmu *spe_pmu = dev_get_drvdata(dev);
 
 	return cpumap_print_to_pagebuf(true, buf, &spe_pmu->supported_cpus);
 }
@@ -929,6 +927,11 @@ static int arm_spe_pmu_perf_init(struct arm_spe_pmu *spe_pmu)
 
 	idx = atomic_inc_return(&pmu_idx);
 	name = devm_kasprintf(dev, GFP_KERNEL, "%s_%d", PMUNAME, idx);
+	if (!name) {
+		dev_err(dev, "failed to allocate name for pmu %d\n", idx);
+		return -ENOMEM;
+	}
+
 	return perf_pmu_register(&spe_pmu->pmu, name, -1);
 }
 
@@ -1171,6 +1174,7 @@ static const struct of_device_id arm_spe_pmu_of_match[] = {
 	{ .compatible = "arm,statistical-profiling-extension-v1", .data = (void *)1 },
 	{ /* Sentinel */ },
 };
+MODULE_DEVICE_TABLE(of, arm_spe_pmu_of_match);
 
 static int arm_spe_pmu_device_dt_probe(struct platform_device *pdev)
 {

@@ -75,7 +75,8 @@ static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev,
 	if (!skb->dev)
 		return NULL;
 
-	pskb_trim_rcsum(skb, skb->len - 4);
+	if (pskb_trim_rcsum(skb, skb->len - 4))
+		return NULL;
 
 	return skb;
 }
@@ -83,4 +84,5 @@ static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev,
 const struct dsa_device_ops trailer_netdev_ops = {
 	.xmit	= trailer_xmit,
 	.rcv	= trailer_rcv,
+	.overhead = 4,
 };

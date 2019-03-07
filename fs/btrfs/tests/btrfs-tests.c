@@ -174,8 +174,10 @@ void btrfs_free_dummy_root(struct btrfs_root *root)
 	/* Will be freed by btrfs_free_fs_roots */
 	if (WARN_ON(test_bit(BTRFS_ROOT_IN_RADIX, &root->state)))
 		return;
-	if (root->node)
+	if (root->node) {
+		/* One for allocate_extent_buffer */
 		free_extent_buffer(root->node);
+	}
 	kfree(root);
 }
 
@@ -219,11 +221,13 @@ void btrfs_free_dummy_block_group(struct btrfs_block_group_cache *cache)
 	kfree(cache);
 }
 
-void btrfs_init_dummy_trans(struct btrfs_trans_handle *trans)
+void btrfs_init_dummy_trans(struct btrfs_trans_handle *trans,
+			    struct btrfs_fs_info *fs_info)
 {
 	memset(trans, 0, sizeof(*trans));
 	trans->transid = 1;
 	trans->type = __TRANS_DUMMY;
+	trans->fs_info = fs_info;
 }
 
 int btrfs_run_sanity_tests(void)

@@ -82,7 +82,7 @@ ACPI_GLOBAL(u8, acpi_gbl_global_lock_pending);
  * interrupt level
  */
 ACPI_GLOBAL(acpi_spinlock, acpi_gbl_gpe_lock);	/* For GPE data structs and registers */
-ACPI_GLOBAL(acpi_spinlock, acpi_gbl_hardware_lock);	/* For ACPI H/W except GPE registers */
+ACPI_GLOBAL(acpi_raw_spinlock, acpi_gbl_hardware_lock);	/* For ACPI H/W except GPE registers */
 ACPI_GLOBAL(acpi_spinlock, acpi_gbl_reference_count_lock);
 
 /* Mutex for _OSI support */
@@ -172,11 +172,7 @@ ACPI_GLOBAL(u8, acpi_gbl_disable_mem_tracking);
  *
  ****************************************************************************/
 
-#if !defined (ACPI_NO_METHOD_EXECUTION) || defined (ACPI_CONSTANT_EVAL_ONLY)
 #define NUM_PREDEFINED_NAMES            10
-#else
-#define NUM_PREDEFINED_NAMES            9
-#endif
 
 ACPI_GLOBAL(struct acpi_namespace_node, acpi_gbl_root_node_struct);
 ACPI_GLOBAL(struct acpi_namespace_node *, acpi_gbl_root_node);

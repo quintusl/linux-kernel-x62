@@ -922,7 +922,7 @@ il_init_channel_map(struct il_priv *il)
 	D_EEPROM("Parsing data for %d channels.\n", il->channel_count);
 
 	il->channel_info =
-	    kzalloc(sizeof(struct il_channel_info) * il->channel_count,
+	    kcalloc(il->channel_count, sizeof(struct il_channel_info),
 		    GFP_KERNEL);
 	if (!il->channel_info) {
 		IL_ERR("Could not allocate channel_info\n");
@@ -2695,6 +2695,7 @@ il_set_decrypted_flag(struct il_priv *il, struct ieee80211_hdr *hdr,
 		if ((decrypt_res & RX_RES_STATUS_DECRYPT_TYPE_MSK) ==
 		    RX_RES_STATUS_BAD_KEY_TTAK)
 			break;
+		/* fall through */
 
 	case RX_RES_STATUS_SEC_TYPE_WEP:
 		if ((decrypt_res & RX_RES_STATUS_DECRYPT_TYPE_MSK) ==
@@ -2704,6 +2705,7 @@ il_set_decrypted_flag(struct il_priv *il, struct ieee80211_hdr *hdr,
 			D_RX("Packet destroyed\n");
 			return -1;
 		}
+		/* fall through */
 	case RX_RES_STATUS_SEC_TYPE_CCMP:
 		if ((decrypt_res & RX_RES_STATUS_DECRYPT_TYPE_MSK) ==
 		    RX_RES_STATUS_DECRYPT_OK) {
@@ -3041,9 +3043,9 @@ il_tx_queue_init(struct il_priv *il, u32 txq_id)
 	}
 
 	txq->meta =
-	    kzalloc(sizeof(struct il_cmd_meta) * actual_slots, GFP_KERNEL);
+	    kcalloc(actual_slots, sizeof(struct il_cmd_meta), GFP_KERNEL);
 	txq->cmd =
-	    kzalloc(sizeof(struct il_device_cmd *) * actual_slots, GFP_KERNEL);
+	    kcalloc(actual_slots, sizeof(struct il_device_cmd *), GFP_KERNEL);
 
 	if (!txq->meta || !txq->cmd)
 		goto out_free_arrays;
@@ -3455,7 +3457,7 @@ il_init_geos(struct il_priv *il)
 	}
 
 	channels =
-	    kzalloc(sizeof(struct ieee80211_channel) * il->channel_count,
+	    kcalloc(il->channel_count, sizeof(struct ieee80211_channel),
 		    GFP_KERNEL);
 	if (!channels)
 		return -ENOMEM;
@@ -4654,8 +4656,9 @@ il_alloc_txq_mem(struct il_priv *il)
 {
 	if (!il->txq)
 		il->txq =
-		    kzalloc(sizeof(struct il_tx_queue) *
-			    il->cfg->num_of_queues, GFP_KERNEL);
+		    kcalloc(il->cfg->num_of_queues,
+			    sizeof(struct il_tx_queue),
+			    GFP_KERNEL);
 	if (!il->txq) {
 		IL_ERR("Not enough memory for txq\n");
 		return -ENOMEM;

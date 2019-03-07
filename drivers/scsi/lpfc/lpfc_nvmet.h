@@ -2,7 +2,7 @@
  * This file is part of the Emulex Linux Device Driver for         *
  * Fibre Channel Host Bus Adapters.                                *
  * Copyright (C) 2017-2018 Broadcom. All Rights Reserved. The term *
- * “Broadcom” refers to Broadcom Limited and/or its subsidiaries.  *
+ * “Broadcom” refers to Broadcom Inc. and/or its subsidiaries.     *
  * Copyright (C) 2004-2016 Emulex.  All rights reserved.           *
  * EMULEX and SLI are trademarks of Emulex.                        *
  * www.broadcom.com                                                *
@@ -22,8 +22,10 @@
  ********************************************************************/
 
 #define LPFC_NVMET_DEFAULT_SEGS		(64 + 1)	/* 256K IOs */
-#define LPFC_NVMET_RQE_DEF_COUNT	512
-#define LPFC_NVMET_SUCCESS_LEN	12
+#define LPFC_NVMET_RQE_MIN_POST		128
+#define LPFC_NVMET_RQE_DEF_POST		512
+#define LPFC_NVMET_RQE_DEF_COUNT	2048
+#define LPFC_NVMET_SUCCESS_LEN		12
 
 #define LPFC_NVMET_MRQ_OFF		0xffff
 #define LPFC_NVMET_MRQ_AUTO		0
@@ -32,7 +34,7 @@
 /* Used for NVME Target */
 struct lpfc_nvmet_tgtport {
 	struct lpfc_hba *phba;
-	struct completion tport_unreg_done;
+	struct completion *tport_unreg_cmp;
 
 	/* Stats counters - lpfc_nvmet_unsol_ls_buffer */
 	atomic_t rcv_ls_req_in;

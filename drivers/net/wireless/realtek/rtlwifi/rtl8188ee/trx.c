@@ -29,7 +29,6 @@
 #include "../stats.h"
 #include "reg.h"
 #include "def.h"
-#include "phy.h"
 #include "trx.h"
 #include "led.h"
 #include "dm.h"
@@ -849,11 +848,4 @@ void rtl88ee_tx_polling(struct ieee80211_hw *hw, u8 hw_queue)
 		rtl_write_word(rtlpriv, REG_PCIE_CTRL_REG,
 			       BIT(0) << (hw_queue));
 	}
-}
-
-u32 rtl88ee_rx_command_packet(struct ieee80211_hw *hw,
-			      const struct rtl_stats *status,
-			      struct sk_buff *skb)
-{
-	return 0;
 }

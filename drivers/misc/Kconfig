@@ -113,6 +113,20 @@ config IBM_ASM
 	  for information on the specific driver level and support statement
 	  for your IBM server.
 
+config IBMVMC
+	tristate "IBM Virtual Management Channel support"
+	depends on PPC_PSERIES
+	help
+	  This is the IBM POWER Virtual Management Channel
+
+	  This driver is to be used for the POWER Virtual
+	  Management Channel virtual adapter on the PowerVM
+	  platform. It provides both request/response and
+	  async message support through the /dev/ibmvmc node.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called ibmvmc.
+
 config PHANTOM
 	tristate "Sensable PHANToM (PCI)"
 	depends on PCI
@@ -498,6 +512,14 @@ config PCI_ENDPOINT_TEST
 config MISC_RTSX
 	tristate
 	default MISC_RTSX_PCI || MISC_RTSX_USB
+
+config PVPANIC
+	tristate "pvpanic device support"
+	depends on HAS_IOMEM && (ACPI || OF)
+	help
+	  This driver provides support for the pvpanic device.  pvpanic is
+	  a paravirtualized device provided by QEMU; it lets a virtual machine
+	  (guest) communicate panic events to the host.
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"

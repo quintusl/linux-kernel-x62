@@ -82,11 +82,11 @@ static enum power_supply_type gpio_charger_get_type(struct device *dev)
 		if (!strcmp("usb-sdp", chargetype))
 			return POWER_SUPPLY_TYPE_USB;
 		if (!strcmp("usb-dcp", chargetype))
-			return POWER_SUPPLY_TYPE_USB_DCP;
+			return POWER_SUPPLY_TYPE_USB;
 		if (!strcmp("usb-cdp", chargetype))
-			return POWER_SUPPLY_TYPE_USB_CDP;
+			return POWER_SUPPLY_TYPE_USB;
 		if (!strcmp("usb-aca", chargetype))
-			return POWER_SUPPLY_TYPE_USB_ACA;
+			return POWER_SUPPLY_TYPE_USB;
 	}
 	dev_warn(dev, "unknown charger type %s\n", chargetype);
 
@@ -212,8 +212,7 @@ static int gpio_charger_suspend(struct device *dev)
 
 static int gpio_charger_resume(struct device *dev)
 {
-	struct platform_device *pdev = to_platform_device(dev);
-	struct gpio_charger *gpio_charger = platform_get_drvdata(pdev);
+	struct gpio_charger *gpio_charger = dev_get_drvdata(dev);
 
 	if (device_may_wakeup(dev) && gpio_charger->wakeup_enabled)
 		disable_irq_wake(gpio_charger->irq);

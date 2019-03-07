@@ -198,11 +198,15 @@ static int fib4_rule_match(struct fib_rule *rule, struct flowi *fl, int flags)
 
 static struct fib_table *fib_empty_table(struct net *net)
 {
-	u32 id;
+	u32 id = 1;
 
-	for (id = 1; id <= RT_TABLE_MAX; id++)
+	while (1) {
 		if (!fib_get_table(net, id))
 			return fib_new_table(net, id);
+
+		if (id++ == RT_TABLE_MAX)
+			break;
+	}
 	return NULL;
 }
 
@@ -213,14 +217,17 @@ static const struct nla_policy fib4_rule_policy[FRA_MAX+1] = {
 
 static int fib4_rule_configure(struct fib_rule *rule, struct sk_buff *skb,
 			       struct fib_rule_hdr *frh,
-			       struct nlattr **tb)
+			       struct nlattr **tb,
+			       struct netlink_ext_ack *extack)
 {
 	struct net *net = sock_net(skb->sk);
 	int err = -EINVAL;
 	struct fib4_rule *rule4 = (struct fib4_rule *) rule;
 
-	if (frh->tos & ~IPTOS_TOS_MASK)
+	if (frh->tos & ~IPTOS_TOS_MASK) {
+		NL_SET_ERR_MSG(extack, "Invalid tos");
 		goto errout;
+	}
 
 	/* split local/main if they are not already split */
 	err = fib_unmerge(net);

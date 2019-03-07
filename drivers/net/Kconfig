@@ -197,8 +197,9 @@ config VXLAN
 
 config GENEVE
        tristate "Generic Network Virtualization Encapsulation"
-       depends on INET && NET_UDP_TUNNEL
-       select NET_IP_TUNNEL
+       depends on INET
+       depends on IPV6 || !IPV6
+       select NET_UDP_TUNNEL
        select GRO_CELLS
        ---help---
 	  This allows one to create geneve virtual interfaces that provide
@@ -331,6 +332,7 @@ config VETH
 config VIRTIO_NET
 	tristate "Virtio network driver"
 	depends on VIRTIO
+	select NET_FAILOVER
 	---help---
 	  This is the virtual network driver for virtio.  It can be used with
 	  QEMU based VMMs (like KVM or Xen).  Say Y or M.
@@ -395,10 +397,10 @@ config NET_SB1000
 
 	  At present this driver only compiles as a module, so say M here if
 	  you have this card. The module will be called sb1000. Then read
-	  <file:Documentation/networking/README.sb1000> for information on how
-	  to use this module, as it needs special ppp scripts for establishing
-	  a connection. Further documentation and the necessary scripts can be
-	  found at:
+	  <file:Documentation/networking/device_drivers/sb1000.txt> for
+	  information on how to use this module, as it needs special ppp
+	  scripts for establishing a connection. Further documentation
+	  and the necessary scripts can be found at:
 
 	  <http://www.jacksonville.net/~fventuri/>
 	  <http://home.adelphia.net/~siglercm/sb1000.html>
@@ -508,5 +510,17 @@ config NETDEVSIM
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called netdevsim.
+
+config NET_FAILOVER
+	tristate "Failover driver"
+	select FAILOVER
+	help
+	  This provides an automated failover mechanism via APIs to create
+	  and destroy a failover master netdev and manages a primary and
+	  standby slave netdevs that get registered via the generic failover
+	  infrastructure. This can be used by paravirtual drivers to enable
+	  an alternate low latency datapath. It also enables live migration of
+	  a VM with direct attached VF by failing over to the paravirtual
+	  datapath when the VF is unplugged.
 
 endif # NETDEVICES

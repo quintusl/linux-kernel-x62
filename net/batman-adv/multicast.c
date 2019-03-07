@@ -815,9 +815,6 @@ static int batadv_mcast_forw_mode_check(struct batadv_priv *bat_priv,
 	if (!atomic_read(&bat_priv->multicast_mode))
 		return -EINVAL;
 
-	if (atomic_read(&bat_priv->mcast.num_disabled))
-		return -EINVAL;
-
 	switch (ntohs(ethhdr->h_proto)) {
 	case ETH_P_IP:
 		return batadv_mcast_forw_mode_check_ipv4(bat_priv, skb,
@@ -1183,33 +1180,23 @@ static void batadv_mcast_tvlv_ogm_handler(struct batadv_priv *bat_priv,
 {
 	bool orig_mcast_enabled = !(flags & BATADV_TVLV_HANDLER_OGM_CIFNOTFND);
 	u8 mcast_flags = BATADV_NO_FLAGS;
-	bool orig_initialized;
 
 	if (orig_mcast_enabled && tvlv_value &&
 	    tvlv_value_len >= sizeof(mcast_flags))
 		mcast_flags = *(u8 *)tvlv_value;
 
-	spin_lock_bh(&orig->mcast_handler_lock);
-	orig_initialized = test_bit(BATADV_ORIG_CAPA_HAS_MCAST,
-				    &orig->capa_initialized);
+	if (!orig_mcast_enabled) {
+		mcast_flags |= BATADV_MCAST_WANT_ALL_IPV4;
+		mcast_flags |= BATADV_MCAST_WANT_ALL_IPV6;
+	}
 
-	/* If mcast support is turned on decrease the disabled mcast node
-	 * counter only if we had increased it for this node before. If this
-	 * is a completely new orig_node no need to decrease the counter.
-	 */
+	spin_lock_bh(&orig->mcast_handler_lock);
+
 	if (orig_mcast_enabled &&
 	    !test_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capabilities)) {
-		if (orig_initialized)
-			atomic_dec(&bat_priv->mcast.num_disabled);
 		set_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capabilities);
-	/* If mcast support is being switched off or if this is an initial
-	 * OGM without mcast support then increase the disabled mcast
-	 * node counter.
-	 */
 	} else if (!orig_mcast_enabled &&
-		   (test_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capabilities) ||
-		    !orig_initialized)) {
-		atomic_inc(&bat_priv->mcast.num_disabled);
+		   test_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capabilities)) {
 		clear_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capabilities);
 	}
 
@@ -1378,21 +1365,25 @@ int batadv_mcast_mesh_info_put(struct sk_buff *msg,
  *  to a netlink socket
  * @msg: buffer for the message
  * @portid: netlink port
- * @seq: Sequence number of netlink message
+ * @cb: Control block containing additional options
  * @orig_node: originator to dump the multicast flags of
  *
  * Return: 0 or error code.
  */
 static int
-batadv_mcast_flags_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
+batadv_mcast_flags_dump_entry(struct sk_buff *msg, u32 portid,
+			      struct netlink_callback *cb,
 			      struct batadv_orig_node *orig_node)
 {
 	void *hdr;
 
-	hdr = genlmsg_put(msg, portid, seq, &batadv_netlink_family,
-			  NLM_F_MULTI, BATADV_CMD_GET_MCAST_FLAGS);
+	hdr = genlmsg_put(msg, portid, cb->nlh->nlmsg_seq,
+			  &batadv_netlink_family, NLM_F_MULTI,
+			  BATADV_CMD_GET_MCAST_FLAGS);
 	if (!hdr)
 		return -ENOBUFS;
+
+	genl_dump_check_consistent(cb, hdr);
 
 	if (nla_put(msg, BATADV_ATTR_ORIG_ADDRESS, ETH_ALEN,
 		    orig_node->orig)) {
@@ -1418,21 +1409,26 @@ batadv_mcast_flags_dump_entry(struct sk_buff *msg, u32 portid, u32 seq,
  *  table to a netlink socket
  * @msg: buffer for the message
  * @portid: netlink port
- * @seq: Sequence number of netlink message
- * @head: bucket to dump
+ * @cb: Control block containing additional options
+ * @hash: hash to dump
+ * @bucket: bucket index to dump
  * @idx_skip: How many entries to skip
  *
  * Return: 0 or error code.
  */
 static int
-batadv_mcast_flags_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
-			       struct hlist_head *head, long *idx_skip)
+batadv_mcast_flags_dump_bucket(struct sk_buff *msg, u32 portid,
+			       struct netlink_callback *cb,
+			       struct batadv_hashtable *hash,
+			       unsigned int bucket, long *idx_skip)
 {
 	struct batadv_orig_node *orig_node;
 	long idx = 0;
 
-	rcu_read_lock();
-	hlist_for_each_entry_rcu(orig_node, head, hash_entry) {
+	spin_lock_bh(&hash->list_locks[bucket]);
+	cb->seq = atomic_read(&hash->generation) << 1 | 1;
+
+	hlist_for_each_entry(orig_node, &hash->table[bucket], hash_entry) {
 		if (!test_bit(BATADV_ORIG_CAPA_HAS_MCAST,
 			      &orig_node->capa_initialized))
 			continue;
@@ -1440,9 +1436,8 @@ batadv_mcast_flags_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
 		if (idx < *idx_skip)
 			goto skip;
 
-		if (batadv_mcast_flags_dump_entry(msg, portid, seq,
-						  orig_node)) {
-			rcu_read_unlock();
+		if (batadv_mcast_flags_dump_entry(msg, portid, cb, orig_node)) {
+			spin_unlock_bh(&hash->list_locks[bucket]);
 			*idx_skip = idx;
 
 			return -EMSGSIZE;
@@ -1451,7 +1446,7 @@ batadv_mcast_flags_dump_bucket(struct sk_buff *msg, u32 portid, u32 seq,
 skip:
 		idx++;
 	}
-	rcu_read_unlock();
+	spin_unlock_bh(&hash->list_locks[bucket]);
 
 	return 0;
 }
@@ -1460,7 +1455,7 @@ skip:
  * __batadv_mcast_flags_dump() - dump multicast flags table to a netlink socket
  * @msg: buffer for the message
  * @portid: netlink port
- * @seq: Sequence number of netlink message
+ * @cb: Control block containing additional options
  * @bat_priv: the bat priv with all the soft interface information
  * @bucket: current bucket to dump
  * @idx: index in current bucket to the next entry to dump
@@ -1468,19 +1463,17 @@ skip:
  * Return: 0 or error code.
  */
 static int
-__batadv_mcast_flags_dump(struct sk_buff *msg, u32 portid, u32 seq,
+__batadv_mcast_flags_dump(struct sk_buff *msg, u32 portid,
+			  struct netlink_callback *cb,
 			  struct batadv_priv *bat_priv, long *bucket, long *idx)
 {
 	struct batadv_hashtable *hash = bat_priv->orig_hash;
 	long bucket_tmp = *bucket;
-	struct hlist_head *head;
 	long idx_tmp = *idx;
 
 	while (bucket_tmp < hash->size) {
-		head = &hash->table[bucket_tmp];
-
-		if (batadv_mcast_flags_dump_bucket(msg, portid, seq, head,
-						   &idx_tmp))
+		if (batadv_mcast_flags_dump_bucket(msg, portid, cb, hash,
+						   *bucket, &idx_tmp))
 			break;
 
 		bucket_tmp++;
@@ -1563,8 +1556,7 @@ int batadv_mcast_flags_dump(struct sk_buff *msg, struct netlink_callback *cb)
 		return ret;
 
 	bat_priv = netdev_priv(primary_if->soft_iface);
-	ret = __batadv_mcast_flags_dump(msg, portid, cb->nlh->nlmsg_seq,
-					bat_priv, bucket, idx);
+	ret = __batadv_mcast_flags_dump(msg, portid, cb, bat_priv, bucket, idx);
 
 	batadv_hardif_put(primary_if);
 	return ret;
@@ -1594,10 +1586,6 @@ void batadv_mcast_purge_orig(struct batadv_orig_node *orig)
 	struct batadv_priv *bat_priv = orig->bat_priv;
 
 	spin_lock_bh(&orig->mcast_handler_lock);
-
-	if (!test_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capabilities) &&
-	    test_bit(BATADV_ORIG_CAPA_HAS_MCAST, &orig->capa_initialized))
-		atomic_dec(&bat_priv->mcast.num_disabled);
 
 	batadv_mcast_want_unsnoop_update(bat_priv, orig, BATADV_NO_FLAGS);
 	batadv_mcast_want_ipv4_update(bat_priv, orig, BATADV_NO_FLAGS);

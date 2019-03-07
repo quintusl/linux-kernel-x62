@@ -192,7 +192,7 @@ static int check_port(__le16 port)
 static unsigned short port_alloc(struct sock *sk)
 {
 	struct dn_scp *scp = DN_SK(sk);
-static unsigned short port = 0x2000;
+	static unsigned short port = 0x2000;
 	unsigned short i_port = port;
 
 	while(check_port(cpu_to_le16(++port)) != 0) {
@@ -2314,19 +2314,6 @@ static const struct seq_operations dn_socket_seq_ops = {
 	.stop	= dn_socket_seq_stop,
 	.show	= dn_socket_seq_show,
 };
-
-static int dn_socket_seq_open(struct inode *inode, struct file *file)
-{
-	return seq_open_private(file, &dn_socket_seq_ops,
-			sizeof(struct dn_iter_state));
-}
-
-static const struct file_operations dn_socket_seq_fops = {
-	.open		= dn_socket_seq_open,
-	.read		= seq_read,
-	.llseek		= seq_lseek,
-	.release	= seq_release_private,
-};
 #endif
 
 static const struct net_proto_family	dn_family_ops = {
@@ -2383,7 +2370,9 @@ static int __init decnet_init(void)
 	dev_add_pack(&dn_dix_packet_type);
 	register_netdevice_notifier(&dn_dev_notifier);
 
-	proc_create("decnet", 0444, init_net.proc_net, &dn_socket_seq_fops);
+	proc_create_seq_private("decnet", 0444, init_net.proc_net,
+			&dn_socket_seq_ops, sizeof(struct dn_iter_state),
+			NULL);
 	dn_register_sysctl();
 out:
 	return rc;
@@ -2416,7 +2405,7 @@ static void __exit decnet_exit(void)
 
 	proto_unregister(&dn_proto);
 
-	rcu_barrier_bh(); /* Wait for completion of call_rcu_bh()'s */
+	rcu_barrier(); /* Wait for completion of call_rcu()'s */
 }
 module_exit(decnet_exit);
 #endif

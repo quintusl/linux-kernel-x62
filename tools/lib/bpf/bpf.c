@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: LGPL-2.1
+// SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 
 /*
  * common eBPF ELF operations.
@@ -28,15 +28,7 @@
 #include <linux/bpf.h>
 #include "bpf.h"
 #include "libbpf.h"
-#include "nlattr.h"
-#include <linux/rtnetlink.h>
-#include <linux/if_link.h>
-#include <sys/socket.h>
 #include <errno.h>
-
-#ifndef SOL_NETLINK
-#define SOL_NETLINK 270
-#endif
 
 /*
  * When building perf, unistd.h is overridden. __NR_bpf is
@@ -73,43 +65,89 @@ static inline int sys_bpf(enum bpf_cmd cmd, union bpf_attr *attr,
 	return syscall(__NR_bpf, cmd, attr, size);
 }
 
-int bpf_create_map_node(enum bpf_map_type map_type, const char *name,
-			int key_size, int value_size, int max_entries,
-			__u32 map_flags, int node)
+static inline int sys_bpf_prog_load(union bpf_attr *attr, unsigned int size)
 {
-	__u32 name_len = name ? strlen(name) : 0;
+	int fd;
+
+	do {
+		fd = sys_bpf(BPF_PROG_LOAD, attr, size);
+	} while (fd < 0 && errno == EAGAIN);
+
+	return fd;
+}
+
+int bpf_create_map_xattr(const struct bpf_create_map_attr *create_attr)
+{
+	__u32 name_len = create_attr->name ? strlen(create_attr->name) : 0;
 	union bpf_attr attr;
 
 	memset(&attr, '\0', sizeof(attr));
 
-	attr.map_type = map_type;
-	attr.key_size = key_size;
-	attr.value_size = value_size;
-	attr.max_entries = max_entries;
-	attr.map_flags = map_flags;
-	memcpy(attr.map_name, name, min(name_len, BPF_OBJ_NAME_LEN - 1));
-
-	if (node >= 0) {
-		attr.map_flags |= BPF_F_NUMA_NODE;
-		attr.numa_node = node;
-	}
+	attr.map_type = create_attr->map_type;
+	attr.key_size = create_attr->key_size;
+	attr.value_size = create_attr->value_size;
+	attr.max_entries = create_attr->max_entries;
+	attr.map_flags = create_attr->map_flags;
+	memcpy(attr.map_name, create_attr->name,
+	       min(name_len, BPF_OBJ_NAME_LEN - 1));
+	attr.numa_node = create_attr->numa_node;
+	attr.btf_fd = create_attr->btf_fd;
+	attr.btf_key_type_id = create_attr->btf_key_type_id;
+	attr.btf_value_type_id = create_attr->btf_value_type_id;
+	attr.map_ifindex = create_attr->map_ifindex;
+	attr.inner_map_fd = create_attr->inner_map_fd;
 
 	return sys_bpf(BPF_MAP_CREATE, &attr, sizeof(attr));
+}
+
+int bpf_create_map_node(enum bpf_map_type map_type, const char *name,
+			int key_size, int value_size, int max_entries,
+			__u32 map_flags, int node)
+{
+	struct bpf_create_map_attr map_attr = {};
+
+	map_attr.name = name;
+	map_attr.map_type = map_type;
+	map_attr.map_flags = map_flags;
+	map_attr.key_size = key_size;
+	map_attr.value_size = value_size;
+	map_attr.max_entries = max_entries;
+	if (node >= 0) {
+		map_attr.numa_node = node;
+		map_attr.map_flags |= BPF_F_NUMA_NODE;
+	}
+
+	return bpf_create_map_xattr(&map_attr);
 }
 
 int bpf_create_map(enum bpf_map_type map_type, int key_size,
 		   int value_size, int max_entries, __u32 map_flags)
 {
-	return bpf_create_map_node(map_type, NULL, key_size, value_size,
-				   max_entries, map_flags, -1);
+	struct bpf_create_map_attr map_attr = {};
+
+	map_attr.map_type = map_type;
+	map_attr.map_flags = map_flags;
+	map_attr.key_size = key_size;
+	map_attr.value_size = value_size;
+	map_attr.max_entries = max_entries;
+
+	return bpf_create_map_xattr(&map_attr);
 }
 
 int bpf_create_map_name(enum bpf_map_type map_type, const char *name,
 			int key_size, int value_size, int max_entries,
 			__u32 map_flags)
 {
-	return bpf_create_map_node(map_type, name, key_size, value_size,
-				   max_entries, map_flags, -1);
+	struct bpf_create_map_attr map_attr = {};
+
+	map_attr.name = name;
+	map_attr.map_type = map_type;
+	map_attr.map_flags = map_flags;
+	map_attr.key_size = key_size;
+	map_attr.value_size = value_size;
+	map_attr.max_entries = max_entries;
+
+	return bpf_create_map_xattr(&map_attr);
 }
 
 int bpf_create_map_in_map_node(enum bpf_map_type map_type, const char *name,
@@ -146,9 +184,35 @@ int bpf_create_map_in_map(enum bpf_map_type map_type, const char *name,
 					  -1);
 }
 
+static void *
+alloc_zero_tailing_info(const void *orecord, __u32 cnt,
+			__u32 actual_rec_size, __u32 expected_rec_size)
+{
+	__u64 info_len = actual_rec_size * cnt;
+	void *info, *nrecord;
+	int i;
+
+	info = malloc(info_len);
+	if (!info)
+		return NULL;
+
+	/* zero out bytes kernel does not understand */
+	nrecord = info;
+	for (i = 0; i < cnt; i++) {
+		memcpy(nrecord, orecord, expected_rec_size);
+		memset(nrecord + expected_rec_size, 0,
+		       actual_rec_size - expected_rec_size);
+		orecord += actual_rec_size;
+		nrecord += actual_rec_size;
+	}
+
+	return info;
+}
+
 int bpf_load_program_xattr(const struct bpf_load_program_attr *load_attr,
 			   char *log_buf, size_t log_buf_sz)
 {
+	void *finfo = NULL, *linfo = NULL;
 	union bpf_attr attr;
 	__u32 name_len;
 	int fd;
@@ -168,19 +232,73 @@ int bpf_load_program_xattr(const struct bpf_load_program_attr *load_attr,
 	attr.log_size = 0;
 	attr.log_level = 0;
 	attr.kern_version = load_attr->kern_version;
+	attr.prog_ifindex = load_attr->prog_ifindex;
+	attr.prog_btf_fd = load_attr->prog_btf_fd;
+	attr.func_info_rec_size = load_attr->func_info_rec_size;
+	attr.func_info_cnt = load_attr->func_info_cnt;
+	attr.func_info = ptr_to_u64(load_attr->func_info);
+	attr.line_info_rec_size = load_attr->line_info_rec_size;
+	attr.line_info_cnt = load_attr->line_info_cnt;
+	attr.line_info = ptr_to_u64(load_attr->line_info);
 	memcpy(attr.prog_name, load_attr->name,
 	       min(name_len, BPF_OBJ_NAME_LEN - 1));
 
-	fd = sys_bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
-	if (fd >= 0 || !log_buf || !log_buf_sz)
+	fd = sys_bpf_prog_load(&attr, sizeof(attr));
+	if (fd >= 0)
 		return fd;
+
+	/* After bpf_prog_load, the kernel may modify certain attributes
+	 * to give user space a hint how to deal with loading failure.
+	 * Check to see whether we can make some changes and load again.
+	 */
+	while (errno == E2BIG && (!finfo || !linfo)) {
+		if (!finfo && attr.func_info_cnt &&
+		    attr.func_info_rec_size < load_attr->func_info_rec_size) {
+			/* try with corrected func info records */
+			finfo = alloc_zero_tailing_info(load_attr->func_info,
+							load_attr->func_info_cnt,
+							load_attr->func_info_rec_size,
+							attr.func_info_rec_size);
+			if (!finfo)
+				goto done;
+
+			attr.func_info = ptr_to_u64(finfo);
+			attr.func_info_rec_size = load_attr->func_info_rec_size;
+		} else if (!linfo && attr.line_info_cnt &&
+			   attr.line_info_rec_size <
+			   load_attr->line_info_rec_size) {
+			linfo = alloc_zero_tailing_info(load_attr->line_info,
+							load_attr->line_info_cnt,
+							load_attr->line_info_rec_size,
+							attr.line_info_rec_size);
+			if (!linfo)
+				goto done;
+
+			attr.line_info = ptr_to_u64(linfo);
+			attr.line_info_rec_size = load_attr->line_info_rec_size;
+		} else {
+			break;
+		}
+
+		fd = sys_bpf_prog_load(&attr, sizeof(attr));
+
+		if (fd >= 0)
+			goto done;
+	}
+
+	if (!log_buf || !log_buf_sz)
+		goto done;
 
 	/* Try again with log */
 	attr.log_buf = ptr_to_u64(log_buf);
 	attr.log_size = log_buf_sz;
 	attr.log_level = 1;
 	log_buf[0] = 0;
-	return sys_bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
+	fd = sys_bpf_prog_load(&attr, sizeof(attr));
+done:
+	free(finfo);
+	free(linfo);
+	return fd;
 }
 
 int bpf_load_program(enum bpf_prog_type type, const struct bpf_insn *insns,
@@ -203,9 +321,9 @@ int bpf_load_program(enum bpf_prog_type type, const struct bpf_insn *insns,
 }
 
 int bpf_verify_program(enum bpf_prog_type type, const struct bpf_insn *insns,
-		       size_t insns_cnt, int strict_alignment,
-		       const char *license, __u32 kern_version,
-		       char *log_buf, size_t log_buf_sz, int log_level)
+		       size_t insns_cnt, __u32 prog_flags, const char *license,
+		       __u32 kern_version, char *log_buf, size_t log_buf_sz,
+		       int log_level)
 {
 	union bpf_attr attr;
 
@@ -219,9 +337,9 @@ int bpf_verify_program(enum bpf_prog_type type, const struct bpf_insn *insns,
 	attr.log_level = log_level;
 	log_buf[0] = 0;
 	attr.kern_version = kern_version;
-	attr.prog_flags = strict_alignment ? BPF_F_STRICT_ALIGNMENT : 0;
+	attr.prog_flags = prog_flags;
 
-	return sys_bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
+	return sys_bpf_prog_load(&attr, sizeof(attr));
 }
 
 int bpf_map_update_elem(int fd, const void *key, const void *value,
@@ -248,6 +366,18 @@ int bpf_map_lookup_elem(int fd, const void *key, void *value)
 	attr.value = ptr_to_u64(value);
 
 	return sys_bpf(BPF_MAP_LOOKUP_ELEM, &attr, sizeof(attr));
+}
+
+int bpf_map_lookup_and_delete_elem(int fd, const void *key, void *value)
+{
+	union bpf_attr attr;
+
+	bzero(&attr, sizeof(attr));
+	attr.map_fd = fd;
+	attr.key = ptr_to_u64(key);
+	attr.value = ptr_to_u64(value);
+
+	return sys_bpf(BPF_MAP_LOOKUP_AND_DELETE_ELEM, &attr, sizeof(attr));
 }
 
 int bpf_map_delete_elem(int fd, const void *key)
@@ -375,6 +505,29 @@ int bpf_prog_test_run(int prog_fd, int repeat, void *data, __u32 size,
 	return ret;
 }
 
+int bpf_prog_test_run_xattr(struct bpf_prog_test_run_attr *test_attr)
+{
+	union bpf_attr attr;
+	int ret;
+
+	if (!test_attr->data_out && test_attr->data_size_out > 0)
+		return -EINVAL;
+
+	bzero(&attr, sizeof(attr));
+	attr.test.prog_fd = test_attr->prog_fd;
+	attr.test.data_in = ptr_to_u64(test_attr->data_in);
+	attr.test.data_out = ptr_to_u64(test_attr->data_out);
+	attr.test.data_size_in = test_attr->data_size_in;
+	attr.test.data_size_out = test_attr->data_size_out;
+	attr.test.repeat = test_attr->repeat;
+
+	ret = sys_bpf(BPF_PROG_TEST_RUN, &attr, sizeof(attr));
+	test_attr->data_size_out = attr.test.data_size_out;
+	test_attr->retval = attr.test.retval;
+	test_attr->duration = attr.test.duration;
+	return ret;
+}
+
 int bpf_prog_get_next_id(__u32 start_id, __u32 *next_id)
 {
 	union bpf_attr attr;
@@ -425,6 +578,16 @@ int bpf_map_get_fd_by_id(__u32 id)
 	return sys_bpf(BPF_MAP_GET_FD_BY_ID, &attr, sizeof(attr));
 }
 
+int bpf_btf_get_fd_by_id(__u32 id)
+{
+	union bpf_attr attr;
+
+	bzero(&attr, sizeof(attr));
+	attr.btf_id = id;
+
+	return sys_bpf(BPF_BTF_GET_FD_BY_ID, &attr, sizeof(attr));
+}
+
 int bpf_obj_get_info_by_fd(int prog_fd, void *info, __u32 *info_len)
 {
 	union bpf_attr attr;
@@ -453,123 +616,50 @@ int bpf_raw_tracepoint_open(const char *name, int prog_fd)
 	return sys_bpf(BPF_RAW_TRACEPOINT_OPEN, &attr, sizeof(attr));
 }
 
-int bpf_set_link_xdp_fd(int ifindex, int fd, __u32 flags)
+int bpf_load_btf(void *btf, __u32 btf_size, char *log_buf, __u32 log_buf_size,
+		 bool do_log)
 {
-	struct sockaddr_nl sa;
-	int sock, seq = 0, len, ret = -1;
-	char buf[4096];
-	struct nlattr *nla, *nla_xdp;
-	struct {
-		struct nlmsghdr  nh;
-		struct ifinfomsg ifinfo;
-		char             attrbuf[64];
-	} req;
-	struct nlmsghdr *nh;
-	struct nlmsgerr *err;
-	socklen_t addrlen;
-	int one = 1;
+	union bpf_attr attr = {};
+	int fd;
 
-	memset(&sa, 0, sizeof(sa));
-	sa.nl_family = AF_NETLINK;
+	attr.btf = ptr_to_u64(btf);
+	attr.btf_size = btf_size;
 
-	sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
-	if (sock < 0) {
-		return -errno;
+retry:
+	if (do_log && log_buf && log_buf_size) {
+		attr.btf_log_level = 1;
+		attr.btf_log_size = log_buf_size;
+		attr.btf_log_buf = ptr_to_u64(log_buf);
 	}
 
-	if (setsockopt(sock, SOL_NETLINK, NETLINK_EXT_ACK,
-		       &one, sizeof(one)) < 0) {
-		fprintf(stderr, "Netlink error reporting not supported\n");
+	fd = sys_bpf(BPF_BTF_LOAD, &attr, sizeof(attr));
+	if (fd == -1 && !do_log && log_buf && log_buf_size) {
+		do_log = true;
+		goto retry;
 	}
 
-	if (bind(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-		ret = -errno;
-		goto cleanup;
-	}
+	return fd;
+}
 
-	addrlen = sizeof(sa);
-	if (getsockname(sock, (struct sockaddr *)&sa, &addrlen) < 0) {
-		ret = -errno;
-		goto cleanup;
-	}
+int bpf_task_fd_query(int pid, int fd, __u32 flags, char *buf, __u32 *buf_len,
+		      __u32 *prog_id, __u32 *fd_type, __u64 *probe_offset,
+		      __u64 *probe_addr)
+{
+	union bpf_attr attr = {};
+	int err;
 
-	if (addrlen != sizeof(sa)) {
-		ret = -LIBBPF_ERRNO__INTERNAL;
-		goto cleanup;
-	}
+	attr.task_fd_query.pid = pid;
+	attr.task_fd_query.fd = fd;
+	attr.task_fd_query.flags = flags;
+	attr.task_fd_query.buf = ptr_to_u64(buf);
+	attr.task_fd_query.buf_len = *buf_len;
 
-	memset(&req, 0, sizeof(req));
-	req.nh.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg));
-	req.nh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	req.nh.nlmsg_type = RTM_SETLINK;
-	req.nh.nlmsg_pid = 0;
-	req.nh.nlmsg_seq = ++seq;
-	req.ifinfo.ifi_family = AF_UNSPEC;
-	req.ifinfo.ifi_index = ifindex;
+	err = sys_bpf(BPF_TASK_FD_QUERY, &attr, sizeof(attr));
+	*buf_len = attr.task_fd_query.buf_len;
+	*prog_id = attr.task_fd_query.prog_id;
+	*fd_type = attr.task_fd_query.fd_type;
+	*probe_offset = attr.task_fd_query.probe_offset;
+	*probe_addr = attr.task_fd_query.probe_addr;
 
-	/* started nested attribute for XDP */
-	nla = (struct nlattr *)(((char *)&req)
-				+ NLMSG_ALIGN(req.nh.nlmsg_len));
-	nla->nla_type = NLA_F_NESTED | IFLA_XDP;
-	nla->nla_len = NLA_HDRLEN;
-
-	/* add XDP fd */
-	nla_xdp = (struct nlattr *)((char *)nla + nla->nla_len);
-	nla_xdp->nla_type = IFLA_XDP_FD;
-	nla_xdp->nla_len = NLA_HDRLEN + sizeof(int);
-	memcpy((char *)nla_xdp + NLA_HDRLEN, &fd, sizeof(fd));
-	nla->nla_len += nla_xdp->nla_len;
-
-	/* if user passed in any flags, add those too */
-	if (flags) {
-		nla_xdp = (struct nlattr *)((char *)nla + nla->nla_len);
-		nla_xdp->nla_type = IFLA_XDP_FLAGS;
-		nla_xdp->nla_len = NLA_HDRLEN + sizeof(flags);
-		memcpy((char *)nla_xdp + NLA_HDRLEN, &flags, sizeof(flags));
-		nla->nla_len += nla_xdp->nla_len;
-	}
-
-	req.nh.nlmsg_len += NLA_ALIGN(nla->nla_len);
-
-	if (send(sock, &req, req.nh.nlmsg_len, 0) < 0) {
-		ret = -errno;
-		goto cleanup;
-	}
-
-	len = recv(sock, buf, sizeof(buf), 0);
-	if (len < 0) {
-		ret = -errno;
-		goto cleanup;
-	}
-
-	for (nh = (struct nlmsghdr *)buf; NLMSG_OK(nh, len);
-	     nh = NLMSG_NEXT(nh, len)) {
-		if (nh->nlmsg_pid != sa.nl_pid) {
-			ret = -LIBBPF_ERRNO__WRNGPID;
-			goto cleanup;
-		}
-		if (nh->nlmsg_seq != seq) {
-			ret = -LIBBPF_ERRNO__INVSEQ;
-			goto cleanup;
-		}
-		switch (nh->nlmsg_type) {
-		case NLMSG_ERROR:
-			err = (struct nlmsgerr *)NLMSG_DATA(nh);
-			if (!err->error)
-				continue;
-			ret = err->error;
-			nla_dump_errormsg(nh);
-			goto cleanup;
-		case NLMSG_DONE:
-			break;
-		default:
-			break;
-		}
-	}
-
-	ret = 0;
-
-cleanup:
-	close(sock);
-	return ret;
+	return err;
 }

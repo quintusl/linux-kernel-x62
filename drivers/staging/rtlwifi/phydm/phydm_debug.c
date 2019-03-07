@@ -1,18 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2016  Realtek Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in the
- * file called LICENSE.
  *
  * Contact Information:
  * wlanfae <wlanfae@realtek.com>
@@ -151,26 +140,17 @@ static inline void phydm_print_csi(struct phy_dm_struct *dm, u32 used,
 		dword_h = odm_get_bb_reg(dm, 0xF74, MASKDWORD);
 		dword_l = odm_get_bb_reg(dm, 0xF5C, MASKDWORD);
 
-		if (index % 2 == 0)
-			PHYDM_SNPRINTF(
-				output + used, out_len - used,
-				"%02x  %02x  %02x  %02x  %02x  %02x  %02x  %02x\n",
-				dword_l & MASKBYTE0, (dword_l & MASKBYTE1) >> 8,
-				(dword_l & MASKBYTE2) >> 16,
-				(dword_l & MASKBYTE3) >> 24,
-				dword_h & MASKBYTE0, (dword_h & MASKBYTE1) >> 8,
-				(dword_h & MASKBYTE2) >> 16,
-				(dword_h & MASKBYTE3) >> 24);
-		else
-			PHYDM_SNPRINTF(
-				output + used, out_len - used,
-				"%02x  %02x  %02x  %02x  %02x  %02x  %02x  %02x\n",
-				dword_l & MASKBYTE0, (dword_l & MASKBYTE1) >> 8,
-				(dword_l & MASKBYTE2) >> 16,
-				(dword_l & MASKBYTE3) >> 24,
-				dword_h & MASKBYTE0, (dword_h & MASKBYTE1) >> 8,
-				(dword_h & MASKBYTE2) >> 16,
-				(dword_h & MASKBYTE3) >> 24);
+		PHYDM_SNPRINTF(output + used,
+			       out_len - used,
+			       "%02x  %02x  %02x  %02x  %02x  %02x  %02x  %02x\n",
+			       dword_l & MASKBYTE0,
+			       (dword_l & MASKBYTE1) >> 8,
+			       (dword_l & MASKBYTE2) >> 16,
+			       (dword_l & MASKBYTE3) >> 24,
+			       dword_h & MASKBYTE0,
+			       (dword_h & MASKBYTE1) >> 8,
+			       (dword_h & MASKBYTE2) >> 16,
+			       (dword_h & MASKBYTE3) >> 24);
 	}
 }
 
@@ -179,9 +159,7 @@ void phydm_init_debug_setting(struct phy_dm_struct *dm)
 	dm->debug_level = ODM_DBG_TRACE;
 
 	dm->fw_debug_components = 0;
-	dm->debug_components =
-
-		0;
+	dm->debug_components = 0;
 
 	dm->fw_buff_is_enpty = true;
 	dm->pre_c2h_seq = 0;

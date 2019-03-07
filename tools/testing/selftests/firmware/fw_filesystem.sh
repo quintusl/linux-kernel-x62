@@ -30,6 +30,7 @@ fi
 
 if [ ! -e "$DIR"/trigger_async_request ]; then
 	echo "$0: empty filename: async trigger not present, ignoring test" >&2
+	exit $ksft_skip
 else
 	if printf '\000' >"$DIR"/trigger_async_request 2> /dev/null; then
 		echo "$0: empty filename should not succeed (async)" >&2
@@ -69,6 +70,7 @@ fi
 # Try the asynchronous version too
 if [ ! -e "$DIR"/trigger_async_request ]; then
 	echo "$0: firmware loading: async trigger not present, ignoring test" >&2
+	exit $ksft_skip
 else
 	if ! echo -n "$NAME" >"$DIR"/trigger_async_request ; then
 		echo "$0: could not trigger async request" >&2
@@ -89,7 +91,7 @@ test_config_present()
 {
 	if [ ! -f $DIR/reset ]; then
 		echo "Configuration triggers not present, ignoring test"
-		exit 0
+		exit $ksft_skip
 	fi
 }
 
@@ -153,11 +155,8 @@ read_firmwares()
 {
 	for i in $(seq 0 3); do
 		config_set_read_fw_idx $i
-		# Verify the contents are what we expect.
-		# -Z required for now -- check for yourself, md5sum
-		# on $FW and DIR/read_firmware will yield the same. Even
-		# cmp agrees, so something is off.
-		if ! diff -q -Z "$FW" $DIR/read_firmware 2>/dev/null ; then
+		# Verify the contents match
+		if ! diff -q "$FW" $DIR/read_firmware 2>/dev/null ; then
 			echo "request #$i: firmware was not loaded" >&2
 			exit 1
 		fi
@@ -169,7 +168,7 @@ read_firmwares_expect_nofile()
 	for i in $(seq 0 3); do
 		config_set_read_fw_idx $i
 		# Ensures contents differ
-		if diff -q -Z "$FW" $DIR/read_firmware 2>/dev/null ; then
+		if diff -q "$FW" $DIR/read_firmware 2>/dev/null ; then
 			echo "request $i: file was not expected to match" >&2
 			exit 1
 		fi

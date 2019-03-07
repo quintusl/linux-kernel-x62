@@ -162,7 +162,7 @@ populate_shared_memory:
 				else
 					ret = 0;
 				break;
-			/* 
+			/*
 			 * If the op was in progress when the interrupt
 			 * occurred, then the client-core was able to
 			 * trigger the write.
@@ -398,8 +398,6 @@ static ssize_t orangefs_file_read_iter(struct kiocb *iocb, struct iov_iter *iter
 	loff_t pos = iocb->ki_pos;
 	ssize_t rc = 0;
 
-	BUG_ON(iocb->private);
-
 	gossip_debug(GOSSIP_FILE_DEBUG, "orangefs_file_read_iter\n");
 
 	orangefs_stats.reads++;
@@ -415,8 +413,6 @@ static ssize_t orangefs_file_write_iter(struct kiocb *iocb, struct iov_iter *ite
 	struct file *file = iocb->ki_filp;
 	loff_t pos;
 	ssize_t rc;
-
-	BUG_ON(iocb->private);
 
 	gossip_debug(GOSSIP_FILE_DEBUG, "orangefs_file_write_iter\n");
 
@@ -528,23 +524,24 @@ static long orangefs_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	return ret;
 }
 
-static int orangefs_fault(struct vm_fault *vmf)
+static vm_fault_t orangefs_fault(struct vm_fault *vmf)
 {
 	struct file *file = vmf->vma->vm_file;
-	int rc;
-	rc = orangefs_inode_getattr(file->f_mapping->host, 0, 1,
+	int ret;
+
+	ret = orangefs_inode_getattr(file->f_mapping->host, 0, 1,
 	    STATX_SIZE);
-	if (rc == -ESTALE)
-		rc = -EIO;
-	if (rc) {
-		gossip_err("%s: orangefs_inode_getattr failed, "
-		    "rc:%d:.\n", __func__, rc);
-		return rc;
+	if (ret == -ESTALE)
+		ret = -EIO;
+	if (ret) {
+		gossip_err("%s: orangefs_inode_getattr failed, ret:%d:.\n",
+				__func__, ret);
+		return VM_FAULT_SIGBUS;
 	}
 	return filemap_fault(vmf);
 }
 
-const struct vm_operations_struct orangefs_file_vm_ops = {
+static const struct vm_operations_struct orangefs_file_vm_ops = {
 	.fault = orangefs_fault,
 	.map_pages = filemap_map_pages,
 	.page_mkwrite = filemap_page_mkwrite,

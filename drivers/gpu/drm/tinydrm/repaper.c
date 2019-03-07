@@ -26,6 +26,8 @@
 #include <linux/spi/spi.h>
 #include <linux/thermal.h>
 
+#include <drm/drm_fb_cma_helper.h>
+#include <drm/drm_gem_cma_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
 #include <drm/tinydrm/tinydrm.h>
 #include <drm/tinydrm/tinydrm-helpers.h>
@@ -106,12 +108,11 @@ static int repaper_spi_transfer(struct spi_device *spi, u8 header,
 
 	/* Stack allocated tx? */
 	if (tx && len <= 32) {
-		txbuf = kmalloc(len, GFP_KERNEL);
+		txbuf = kmemdup(tx, len, GFP_KERNEL);
 		if (!txbuf) {
 			ret = -ENOMEM;
 			goto out_free;
 		}
-		memcpy(txbuf, tx, len);
 	}
 
 	if (rx) {
@@ -540,31 +541,23 @@ static int repaper_fb_dirty(struct drm_framebuffer *fb,
 	clip.y1 = 0;
 	clip.y2 = fb->height;
 
-	mutex_lock(&tdev->dirty_lock);
-
 	if (!epd->enabled)
-		goto out_unlock;
-
-	/* fbdev can flush even when we're not interested */
-	if (tdev->pipe.plane.fb != fb)
-		goto out_unlock;
+		return 0;
 
 	repaper_get_temperature(epd);
 
 	DRM_DEBUG("Flushing [FB:%d] st=%ums\n", fb->base.id,
 		  epd->factored_stage_time);
 
-	buf = kmalloc(fb->width * fb->height, GFP_KERNEL);
-	if (!buf) {
-		ret = -ENOMEM;
-		goto out_unlock;
-	}
+	buf = kmalloc_array(fb->width, fb->height, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
 
 	if (import_attach) {
 		ret = dma_buf_begin_cpu_access(import_attach->dmabuf,
 					       DMA_FROM_DEVICE);
 		if (ret)
-			goto out_unlock;
+			goto out_free;
 	}
 
 	tinydrm_xrgb8888_to_gray8(buf, cma_obj->vaddr, fb, &clip);
@@ -573,7 +566,7 @@ static int repaper_fb_dirty(struct drm_framebuffer *fb,
 		ret = dma_buf_end_cpu_access(import_attach->dmabuf,
 					     DMA_FROM_DEVICE);
 		if (ret)
-			goto out_unlock;
+			goto out_free;
 	}
 
 	repaper_gray8_to_mono_reversed(buf, fb->width, fb->height);
@@ -625,11 +618,7 @@ static int repaper_fb_dirty(struct drm_framebuffer *fb,
 			}
 	}
 
-out_unlock:
-	mutex_unlock(&tdev->dirty_lock);
-
-	if (ret)
-		DRM_DEV_ERROR(fb->dev->dev, "Failed to update display (%d)\n", ret);
+out_free:
 	kfree(buf);
 
 	return ret;
@@ -638,7 +627,7 @@ out_unlock:
 static const struct drm_framebuffer_funcs repaper_fb_funcs = {
 	.destroy	= drm_gem_fb_destroy,
 	.create_handle	= drm_gem_fb_create_handle,
-	.dirty		= repaper_fb_dirty,
+	.dirty		= tinydrm_fb_dirty,
 };
 
 static void power_off(struct repaper_epd *epd)
@@ -659,7 +648,8 @@ static void power_off(struct repaper_epd *epd)
 }
 
 static void repaper_pipe_enable(struct drm_simple_display_pipe *pipe,
-				struct drm_crtc_state *crtc_state)
+				struct drm_crtc_state *crtc_state,
+				struct drm_plane_state *plane_state)
 {
 	struct tinydrm_device *tdev = pipe_to_tinydrm(pipe);
 	struct repaper_epd *epd = epd_from_tinydrm(tdev);
@@ -852,7 +842,7 @@ static const struct drm_simple_display_pipe_funcs repaper_pipe_funcs = {
 	.enable = repaper_pipe_enable,
 	.disable = repaper_pipe_disable,
 	.update = tinydrm_display_pipe_update,
-	.prepare_fb = tinydrm_display_pipe_prepare_fb,
+	.prepare_fb = drm_gem_fb_simple_display_pipe_prepare_fb,
 };
 
 static const uint32_t repaper_formats[] = {
@@ -893,7 +883,7 @@ static struct drm_driver repaper_driver = {
 	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_PRIME |
 				  DRIVER_ATOMIC,
 	.fops			= &repaper_fops,
-	TINYDRM_GEM_DRIVER_OPS,
+	DRM_GEM_CMA_VMAP_DRIVER_OPS,
 	.name			= "repaper",
 	.desc			= "Pervasive Displays RePaper e-ink panels",
 	.date			= "20170405",
@@ -1068,6 +1058,8 @@ static int repaper_probe(struct spi_device *spi)
 	ret = devm_tinydrm_init(dev, tdev, &repaper_fb_funcs, &repaper_driver);
 	if (ret)
 		return ret;
+
+	tdev->fb_dirty = repaper_fb_dirty;
 
 	ret = tinydrm_display_pipe_init(tdev, &repaper_pipe_funcs,
 					DRM_MODE_CONNECTOR_VIRTUAL,

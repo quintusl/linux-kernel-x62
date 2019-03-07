@@ -274,7 +274,7 @@ static int link_start(struct net_device *dev)
 	 * is enabled on a port.
 	 */
 	if (ret == 0)
-		ret = t4vf_enable_vi(pi->adapter, pi->viid, true, true);
+		ret = t4vf_enable_pi(pi->adapter, pi, true, true);
 
 	/* The Virtual Interfaces are connected to an internal switch on the
 	 * chip which allows VIs attached to the same port to talk to each
@@ -722,6 +722,7 @@ static int adapter_up(struct adapter *adapter)
 
 		if (adapter->flags & USING_MSIX)
 			name_msix_vecs(adapter);
+
 		adapter->flags |= FULL_INIT_DONE;
 	}
 
@@ -747,8 +748,6 @@ static int adapter_up(struct adapter *adapter)
 	enable_rx(adapter);
 	t4vf_sge_start(adapter);
 
-	/* Initialize hash mac addr list*/
-	INIT_LIST_HEAD(&adapter->mac_hlist);
 	return 0;
 }
 
@@ -822,8 +821,7 @@ static int cxgb4vf_stop(struct net_device *dev)
 
 	netif_tx_stop_all_queues(dev);
 	netif_carrier_off(dev);
-	t4vf_enable_vi(adapter, pi->viid, false, false);
-	pi->link_cfg.link_ok = 0;
+	t4vf_enable_pi(adapter, pi, false, false);
 
 	clear_bit(pi->port_id, &adapter->open_device_map);
 	if (adapter->open_device_map == 0)
@@ -1417,6 +1415,22 @@ static int cxgb4vf_get_link_ksettings(struct net_device *dev,
 	} else {
 		base->speed = SPEED_UNKNOWN;
 		base->duplex = DUPLEX_UNKNOWN;
+	}
+
+	if (pi->link_cfg.fc & PAUSE_RX) {
+		if (pi->link_cfg.fc & PAUSE_TX) {
+			ethtool_link_ksettings_add_link_mode(link_ksettings,
+							     advertising,
+							     Pause);
+		} else {
+			ethtool_link_ksettings_add_link_mode(link_ksettings,
+							     advertising,
+							     Asym_Pause);
+		}
+	} else if (pi->link_cfg.fc & PAUSE_TX) {
+		ethtool_link_ksettings_add_link_mode(link_ksettings,
+						     advertising,
+						     Asym_Pause);
 	}
 
 	base->autoneg = pi->link_cfg.autoneg;
@@ -2309,19 +2323,7 @@ static int resources_show(struct seq_file *seq, void *v)
 
 	return 0;
 }
-
-static int resources_open(struct inode *inode, struct file *file)
-{
-	return single_open(file, resources_show, inode->i_private);
-}
-
-static const struct file_operations resources_proc_fops = {
-	.owner   = THIS_MODULE,
-	.open    = resources_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = single_release,
-};
+DEFINE_SHOW_ATTRIBUTE(resources);
 
 /*
  * Show Virtual Interfaces.
@@ -2405,7 +2407,7 @@ static struct cxgb4vf_debugfs_entry debugfs_files[] = {
 	{ "mboxlog",    0444, &mboxlog_fops },
 	{ "sge_qinfo",  0444, &sge_qinfo_debugfs_fops },
 	{ "sge_qstats", 0444, &sge_qstats_proc_fops },
-	{ "resources",  0444, &resources_proc_fops },
+	{ "resources",  0444, &resources_fops },
 	{ "interfaces", 0444, &interfaces_proc_fops },
 };
 
@@ -3021,6 +3023,9 @@ static int cxgb4vf_pci_probe(struct pci_dev *pdev,
 	if (err)
 		goto err_unmap_bar;
 
+	/* Initialize hash mac addr list */
+	INIT_LIST_HEAD(&adapter->mac_hlist);
+
 	/*
 	 * Allocate our "adapter ports" and stitch everything together.
 	 */
@@ -3272,6 +3277,7 @@ err_disable_device:
 static void cxgb4vf_pci_remove(struct pci_dev *pdev)
 {
 	struct adapter *adapter = pci_get_drvdata(pdev);
+	struct hash_mac_addr *entry, *tmp;
 
 	/*
 	 * Tear down driver state associated with device.
@@ -3322,6 +3328,11 @@ static void cxgb4vf_pci_remove(struct pci_dev *pdev)
 		if (!is_t4(adapter->params.chip))
 			iounmap(adapter->bar2);
 		kfree(adapter->mbox_log);
+		list_for_each_entry_safe(entry, tmp, &adapter->mac_hlist,
+					 list) {
+			list_del(&entry->list);
+			kfree(entry);
+		}
 		kfree(adapter);
 	}
 

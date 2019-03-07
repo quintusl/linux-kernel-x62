@@ -209,7 +209,6 @@ struct qib_ctxtdata *qib_create_ctxtdata(struct qib_pportdata *ppd, u32 ctxt,
 		rcd->rcvegrbuf_chunks = (rcd->rcvegrcnt +
 			rcd->rcvegrbufs_perchunk - 1) /
 			rcd->rcvegrbufs_perchunk;
-		BUG_ON(!is_power_of_2(rcd->rcvegrbufs_perchunk));
 		rcd->rcvegrbufs_perchunk_shift =
 			ilog2(rcd->rcvegrbufs_perchunk);
 	}
@@ -369,11 +368,13 @@ static void init_shadow_tids(struct qib_devdata *dd)
 	struct page **pages;
 	dma_addr_t *addrs;
 
-	pages = vzalloc(dd->cfgctxts * dd->rcvtidcnt * sizeof(struct page *));
+	pages = vzalloc(array_size(sizeof(struct page *),
+				   dd->cfgctxts * dd->rcvtidcnt));
 	if (!pages)
 		goto bail;
 
-	addrs = vzalloc(dd->cfgctxts * dd->rcvtidcnt * sizeof(dma_addr_t));
+	addrs = vzalloc(array_size(sizeof(dma_addr_t),
+				   dd->cfgctxts * dd->rcvtidcnt));
 	if (!addrs)
 		goto bail_free;
 
@@ -841,6 +842,10 @@ static void qib_shutdown_device(struct qib_devdata *dd)
 	struct qib_pportdata *ppd;
 	unsigned pidx;
 
+	if (dd->flags & QIB_SHUTDOWN)
+		return;
+	dd->flags |= QIB_SHUTDOWN;
+
 	for (pidx = 0; pidx < dd->num_pports; ++pidx) {
 		ppd = dd->pport + pidx;
 
@@ -1130,8 +1135,8 @@ struct qib_devdata *qib_alloc_devdata(struct pci_dev *pdev, size_t extra)
 	if (!qib_cpulist_count) {
 		u32 count = num_online_cpus();
 
-		qib_cpulist = kzalloc(BITS_TO_LONGS(count) *
-				      sizeof(long), GFP_KERNEL);
+		qib_cpulist = kcalloc(BITS_TO_LONGS(count), sizeof(long),
+				      GFP_KERNEL);
 		if (qib_cpulist)
 			qib_cpulist_count = count;
 	}
@@ -1182,6 +1187,7 @@ void qib_disable_after_error(struct qib_devdata *dd)
 
 static void qib_remove_one(struct pci_dev *);
 static int qib_init_one(struct pci_dev *, const struct pci_device_id *);
+static void qib_shutdown_one(struct pci_dev *);
 
 #define DRIVER_LOAD_MSG "Intel " QIB_DRV_NAME " loaded: "
 #define PFX QIB_DRV_NAME ": "
@@ -1199,6 +1205,7 @@ static struct pci_driver qib_driver = {
 	.name = QIB_DRV_NAME,
 	.probe = qib_init_one,
 	.remove = qib_remove_one,
+	.shutdown = qib_shutdown_one,
 	.id_table = qib_pci_tbl,
 	.err_handler = &qib_pci_err_handler,
 };
@@ -1549,6 +1556,13 @@ static void qib_remove_one(struct pci_dev *pdev)
 	qib_postinit_cleanup(dd);
 }
 
+static void qib_shutdown_one(struct pci_dev *pdev)
+{
+	struct qib_devdata *dd = pci_get_drvdata(pdev);
+
+	qib_shutdown_device(dd);
+}
+
 /**
  * qib_create_rcvhdrq - create a receive header queue
  * @dd: the qlogic_ib device
@@ -1660,8 +1674,8 @@ int qib_setup_eagerbufs(struct qib_ctxtdata *rcd)
 	size = rcd->rcvegrbuf_size;
 	if (!rcd->rcvegrbuf) {
 		rcd->rcvegrbuf =
-			kzalloc_node(chunk * sizeof(rcd->rcvegrbuf[0]),
-				GFP_KERNEL, rcd->node_id);
+			kcalloc_node(chunk, sizeof(rcd->rcvegrbuf[0]),
+				     GFP_KERNEL, rcd->node_id);
 		if (!rcd->rcvegrbuf)
 			goto bail;
 	}

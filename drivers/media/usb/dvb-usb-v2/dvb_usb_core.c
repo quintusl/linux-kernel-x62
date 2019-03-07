@@ -47,7 +47,7 @@ static int dvb_usbv2_download_firmware(struct dvb_usb_device *d,
 	ret = request_firmware(&fw, name, &d->udev->dev);
 	if (ret < 0) {
 		dev_err(&d->udev->dev,
-				"%s: Did not find the firmware file '%s'. Please see linux/Documentation/dvb/ for more details on firmware-problems. Status %d\n",
+				"%s: Did not find the firmware file '%s' (status %d). You can use <kernel_dir>/scripts/get_dvb_firmware to get the firmware\n",
 				KBUILD_MODNAME, name, ret);
 		goto err;
 	}
@@ -74,7 +74,7 @@ static int dvb_usbv2_i2c_init(struct dvb_usb_device *d)
 	if (!d->props->i2c_algo)
 		return 0;
 
-	strlcpy(d->i2c_adap.name, d->name, sizeof(d->i2c_adap.name));
+	strscpy(d->i2c_adap.name, d->name, sizeof(d->i2c_adap.name));
 	d->i2c_adap.algo = d->props->i2c_algo;
 	d->i2c_adap.dev.parent = &d->udev->dev;
 	i2c_set_adapdata(&d->i2c_adap, d);
@@ -957,9 +957,7 @@ int dvb_usbv2_probe(struct usb_interface *intf,
 	if (d->props->identify_state) {
 		const char *name = NULL;
 		ret = d->props->identify_state(d, &name);
-		if (ret == 0) {
-			;
-		} else if (ret == COLD) {
+		if (ret == COLD) {
 			dev_info(&d->udev->dev,
 					"%s: found a '%s' in cold state\n",
 					KBUILD_MODNAME, d->name);
@@ -984,7 +982,7 @@ int dvb_usbv2_probe(struct usb_interface *intf,
 			} else {
 				goto err_free_all;
 			}
-		} else {
+		} else if (ret != WARM) {
 			goto err_free_all;
 		}
 	}

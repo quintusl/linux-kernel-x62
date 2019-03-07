@@ -9,12 +9,18 @@
 
 #include <linux/backlight.h>
 #include <linux/dma-buf.h>
+#include <linux/module.h>
 #include <linux/pm.h>
 #include <linux/spi/spi.h>
 #include <linux/swab.h>
 
+#include <drm/drm_device.h>
+#include <drm/drm_drv.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_print.h>
 #include <drm/tinydrm/tinydrm.h>
 #include <drm/tinydrm/tinydrm-helpers.h>
+#include <uapi/drm/drm.h>
 
 static unsigned int spi_max;
 module_param(spi_max, uint, 0400);
@@ -77,6 +83,36 @@ bool tinydrm_merge_clips(struct drm_clip_rect *dst,
 	       (dst->y2 - dst->y1) == max_height;
 }
 EXPORT_SYMBOL(tinydrm_merge_clips);
+
+int tinydrm_fb_dirty(struct drm_framebuffer *fb,
+		     struct drm_file *file_priv,
+		     unsigned int flags, unsigned int color,
+		     struct drm_clip_rect *clips,
+		     unsigned int num_clips)
+{
+	struct tinydrm_device *tdev = fb->dev->dev_private;
+	struct drm_plane *plane = &tdev->pipe.plane;
+	int ret = 0;
+
+	drm_modeset_lock(&plane->mutex, NULL);
+
+	/* fbdev can flush even when we're not interested */
+	if (plane->state->fb == fb) {
+		mutex_lock(&tdev->dirty_lock);
+		ret = tdev->fb_dirty(fb, file_priv, flags,
+				     color, clips, num_clips);
+		mutex_unlock(&tdev->dirty_lock);
+	}
+
+	drm_modeset_unlock(&plane->mutex);
+
+	if (ret)
+		dev_err_once(fb->dev->dev,
+			     "Failed to update display %d\n", ret);
+
+	return ret;
+}
+EXPORT_SYMBOL(tinydrm_fb_dirty);
 
 /**
  * tinydrm_memcpy - Copy clip buffer
